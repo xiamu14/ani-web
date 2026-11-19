@@ -14,10 +14,17 @@ from agent.extensions.skill_resolver import (
     parse_semver,
 )
 from agent.extensions.skills import ProgressiveSkillsCapability, build_skills_capability
+from agent.extensions.tool_search import (
+    DeferToolsCapability,
+    ToolDisclosurePolicy,
+    bilingual_tool_search_fn,
+    build_tool_search_capabilities,
+)
 
 __all__ = [
     "BUILTIN_SKILLS_DIR",
     "DEFAULT_SKILL_VERSION",
+    "DeferToolsCapability",
     "ProgressiveSkillsCapability",
     "ResolvedSkill",
     "ResolvedSkillCatalog",
@@ -26,7 +33,10 @@ __all__ = [
     "SkillIndexEntry",
     "SkillScope",
     "SkillSourceSpec",
+    "ToolDisclosurePolicy",
     "arbitrate_skill_candidates",
+    "bilingual_tool_search_fn",
     "build_skills_capability",
+    "build_tool_search_capabilities",
     "parse_semver",
 ]

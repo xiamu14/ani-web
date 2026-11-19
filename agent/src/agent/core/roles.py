@@ -17,6 +17,7 @@ from pydantic_ai.toolsets import AbstractToolset
 from pydantic_ai_harness import Coder, FileSystem, Shell
 from pydantic_ai_harness.step_persistence import StepPersistence, StepStore
 
+from agent.extensions import ToolDisclosurePolicy, build_tool_search_capabilities
 from agent.hooks import sort_capabilities
 from agent.tools import LockMode
 
@@ -47,6 +48,7 @@ class RoleSpec:
     capabilities: Sequence[AbstractCapability[object]] = ()
     toolsets: Sequence[AbstractToolset[object]] = ()
     default_lock_mode: LockMode = "exclusive"
+    tool_disclosure: ToolDisclosurePolicy | None = None
 
     def build_agent(
         self,
@@ -59,6 +61,8 @@ class RoleSpec:
             *self.capabilities,
             *extra_capabilities,
         ]
+        if self.tool_disclosure is not None:
+            caps.extend(build_tool_search_capabilities(self.tool_disclosure))
         if step_store is not None:
             caps.append(
                 StepPersistence(store=step_store, agent_name=self.name, capture_frontier=True)
