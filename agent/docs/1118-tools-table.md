@@ -27,6 +27,7 @@
 | **Router 工具集** | `dispatch_role_agent` | 有账本状态（`tickets`） | 有派发副作用 | **`exclusive`** | `conv:<main_conversation_id>` | 配合调度器 `_dispatch_lock` 串行分配 `@task_id` |
 | **Router 工具集** | `steer_or_revise_task` | 有任务状态 | 有控制副作用 | **`exclusive`** | `ticket:<main_conv_id>:<task_id>` | 同任务控制指令串行 |
 | **Router 工具集** | `cancel_task` | 有任务状态 | 有控制副作用 | **`exclusive`** | `ticket:<main_conv_id>:<task_id>` | 同任务取消与状态清理串行 |
+| **Pydantic AI 框架元工具** | `load_capability`、`search_tools`（`tool_kind` 为 `capability-load` / `tool-search`） | 无状态 | 无副作用 | **`none`** | — | 按需披露检索与指令加载，不抢占工作区写锁 |
 
 ---
 

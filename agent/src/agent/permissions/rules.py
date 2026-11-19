@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +34,12 @@ _PATH_ARG_KEYS: tuple[str, ...] = (
     "work_path",
 )
 _CMD_ARG_KEYS: tuple[str, ...] = ("command", "cmd", "script")
+_SAFE_SYSTEM_DEV_PATHS: frozenset[str] = frozenset(
+    {"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/stdin"}
+)
+_SHELL_OPERATORS: frozenset[str] = frozenset({"|", "||", "&&", ";", ">", ">>", "<", "<<", "&"})
+_REDIRECT_PREFIX_RE = re.compile(r"^(?:\d*>>?|\d*<|&>>?)")
+_URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -146,8 +153,49 @@ def _resolve_target_path(raw_path: str, workspace_root: Path | None) -> Path:
 
 def _is_within_workspace(target: Path, workspace_root: Path | None) -> bool:
     if workspace_root is None:
-        return True
+        return False
     return target.is_relative_to(workspace_root)
+
+
+def _has_parent_segment(token: str) -> bool:
+    return token == ".." or token.startswith("../") or token.endswith("/..") or "/../" in token
+
+
+def _extract_candidate_tokens(raw_token: str) -> list[str]:
+    stripped = _REDIRECT_PREFIX_RE.sub("", raw_token.strip()).strip("'\"")
+    if not stripped or stripped in _SHELL_OPERATORS:
+        return []
+    if "=" in stripped and not stripped.startswith(("/", "~")):
+        _, _, value = stripped.partition("=")
+        return [value.strip("'\"")] if value else []
+    return [stripped]
+
+
+def _find_outside_workspace_cmd_path(cmd_text: str, workspace_root: Path) -> str | None:
+    try:
+        raw_tokens = shlex.split(cmd_text, posix=True)
+    except ValueError:
+        raw_tokens = cmd_text.split()
+
+    for raw_tok in raw_tokens:
+        for tok in _extract_candidate_tokens(raw_tok):
+            if not tok or _URL_SCHEME_RE.match(tok):
+                continue
+            if tok == "~" or tok.startswith("~/"):
+                resolved = Path(tok).expanduser().resolve()
+                if not resolved.is_relative_to(workspace_root):
+                    return tok
+            elif _has_parent_segment(tok):
+                resolved = (workspace_root / tok).resolve()
+                if not resolved.is_relative_to(workspace_root):
+                    return tok
+            elif tok.startswith("/") and not tok.startswith("//"):
+                if tok in _SAFE_SYSTEM_DEV_PATHS:
+                    continue
+                resolved = Path(tok).resolve()
+                if not resolved.is_relative_to(workspace_root):
+                    return tok
+    return None
 
 
 def evaluate_tool_rule(
@@ -187,6 +235,21 @@ def evaluate_tool_rule(
                     category=rule.category,
                     reason=rule.reason,
                 )
+        if norm_ws is None:
+            return RuleVerdict(
+                level="review",
+                rule_id="review.cmd.no_workspace_shell",
+                category="out_of_workspace_shell",
+                reason="未绑定受限工作区，执行 Shell 命令需审核确认",
+            )
+        outside_tok = _find_outside_workspace_cmd_path(cmd_text, norm_ws)
+        if outside_tok is not None:
+            return RuleVerdict(
+                level="review",
+                rule_id="review.cmd.outside_workspace_access",
+                category="out_of_workspace_shell",
+                reason=f"Shell 命令引用或执行受限工作区外路径，需审核确认: {outside_tok}",
+            )
 
     # 2. 路径与读写/数据敏感度规则
     if raw_path is not None:
@@ -205,7 +268,22 @@ def evaluate_tool_rule(
         if tool_name in _WORKSPACE_BIND_TOOLS:
             return RuleVerdict(level="pass")
 
-        if not _is_within_workspace(target, norm_ws):
+        if norm_ws is None:
+            if tool_name in _WRITE_TOOLS:
+                return RuleVerdict(
+                    level="forbid",
+                    rule_id="forbid.path.no_workspace_write",
+                    category="out_of_workspace_write",
+                    reason=f"未绑定受限工作区，禁止执行写/改操作: {target}",
+                )
+            if tool_name in _READ_TOOLS:
+                return RuleVerdict(
+                    level="review",
+                    rule_id="review.path.no_workspace_read",
+                    category="out_of_workspace_read",
+                    reason=f"未绑定受限工作区，读取本地路径需审核确认: {target}",
+                )
+        elif not _is_within_workspace(target, norm_ws):
             if tool_name in _WRITE_TOOLS:
                 return RuleVerdict(
                     level="forbid",
@@ -230,5 +308,20 @@ def evaluate_tool_rule(
                         category="critical_config_write",
                         reason=f"修改核心配置/规则/SQL 文件，需审核风险: {raw_path}",
                     )
+    elif norm_ws is None:
+        if tool_name in _WRITE_TOOLS:
+            return RuleVerdict(
+                level="forbid",
+                rule_id="forbid.path.no_workspace_write",
+                category="out_of_workspace_write",
+                reason="未绑定受限工作区，禁止执行写/改操作",
+            )
+        if tool_name in _READ_TOOLS:
+            return RuleVerdict(
+                level="review",
+                rule_id="review.path.no_workspace_read",
+                category="out_of_workspace_read",
+                reason="未绑定受限工作区，读取本地路径需审核确认",
+            )
 
     return RuleVerdict(level="pass")

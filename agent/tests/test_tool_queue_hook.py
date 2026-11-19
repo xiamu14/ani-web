@@ -21,7 +21,11 @@ from pydantic_ai.toolsets import FunctionToolset
 
 from agent.hooks import PermissionGuardHook, sort_capabilities
 from agent.permissions import PermissionReviewer
-from agent.tools import ToolExecutionQueueHook, ToolLockCoordinator, resolve_tool_resource
+from agent.tools import (
+    ToolExecutionQueueHook,
+    ToolLockCoordinator,
+    resolve_tool_resource,
+)
 
 
 class TestToolQueueHook(unittest.IsolatedAsyncioTestCase):
@@ -40,6 +44,19 @@ class TestToolQueueHook(unittest.IsolatedAsyncioTestCase):
 
         r_list = resolve_tool_resource("list_tasks", {}, workspace_root=ws, main_conversation_id="c1")
         self.assertEqual((r_list.kind, r_list.lock_mode), ("none", "none"))
+
+        r_load = resolve_tool_resource("load_capability", {"id": "demo"}, workspace_root=ws)
+        self.assertEqual((r_load.kind, r_load.lock_mode), ("none", "none"))
+
+        r_cap_kind = resolve_tool_resource(
+            "custom_loader", {}, workspace_root=ws, tool_kind="capability-load"
+        )
+        self.assertEqual((r_cap_kind.kind, r_cap_kind.lock_mode), ("none", "none"))
+
+        r_search_kind = resolve_tool_resource(
+            "custom_search", {}, workspace_root=ws, tool_kind="tool-search"
+        )
+        self.assertEqual((r_search_kind.kind, r_search_kind.lock_mode), ("none", "none"))
 
         r_steer = resolve_tool_resource(
             "steer_or_revise_task", {"task_id": "@T2"}, main_conversation_id="c1"

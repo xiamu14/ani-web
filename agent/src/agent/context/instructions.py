@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 AGENTS_FILENAME = "AGENTS.md"
+AGENT_CONFIG_DIR = ".agent"
+SKILLS_SUBDIR = "skills"
 
 
 def normalize_workspace_path(path: str | Path) -> Path:
@@ -12,6 +14,26 @@ def normalize_workspace_path(path: str | Path) -> Path:
     resolved = Path(path).expanduser().resolve()
     if not resolved.exists() or not resolved.is_dir():
         raise ValueError(f"工作区路径不存在或不是目录: {resolved}")
+    return resolved
+
+
+def default_global_agent_dir() -> Path:
+    """返回用户级全局配置目录（~/.agent）的规范化绝对路径。"""
+    return (Path.home() / AGENT_CONFIG_DIR).expanduser().resolve()
+
+
+def resolve_workspace_subdir(work_path: str | Path, *parts: str) -> Path:
+    """基于工作区根目录解析受限子目录路径，禁止绝对路径与逃逸父目录边界。"""
+    base = normalize_workspace_path(work_path)
+    target = base
+    for part in parts:
+        candidate = Path(part)
+        if candidate.is_absolute():
+            raise ValueError(f"工作区子路径不能为绝对路径: {part}")
+        target = target / candidate
+    resolved = target.resolve()
+    if not resolved.is_relative_to(base):
+        raise ValueError(f"工作区子路径越界，禁止脱离 {base}: {resolved}")
     return resolved
 
 

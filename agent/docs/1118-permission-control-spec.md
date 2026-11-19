@@ -44,13 +44,13 @@ flowchart TD
 ### 1. 规则声明层（`src/agent/permissions/rules.py`）
 - **`FORBIDDEN`（禁止 Rules）**：绝对红线，例如：
   - 破坏性系统/磁盘/进程命令（`rm -rf /`、`mkfs`、`dd if=`、`shutdown` 等）；
-  - 越界写入/删除受限工作区之外的路径；
+  - 越界写入/删除受限工作区之外的路径，以及未绑定受限工作区（`workspace_root=None`）时的写文件操作（fail-closed）；
   - 读取或外传敏感凭证（`.env`、SSH 私钥、`id_rsa`、系统密钥目录）；
   - 不可逆高危 Git/数据操作（`git push --force`、`git reset --hard`、删库命令等）。
-- **`REVIEW`（审核范围 Rules）**：按**读写与数据影响**综合定级为“有风险但不必然破坏”，例如：
-  - 工作区外的只读文件访问；
+- **`REVIEW`（审核范围 Rules）**：按**读写与数据影响**综合定级为“有风险但不必然破坏”（任何作用域的 Skill 均不享有路径白名单，遵循单一固定 Mode）：
+  - 工作区外的只读文件访问（`review.path.outside_workspace_read`），以及未绑定受限工作区时的只读文件/Shell 访问（fail-closed）；
   - 修改关键构建/环境/权限配置文件（如 `pyproject.toml`、`package.json`、Dockerfile、CI 配置）；
-  - `shell` / `run_command` 执行包安装、外部网络访问（`curl`/`wget`）、进程控制或批量文件操作；
+  - `shell` / `run_command` 执行包安装、外部网络访问（`curl`/`wget`）、进程控制、批量文件操作，或引用/执行受限工作区之外的路径/脚本（`review.cmd.outside_workspace_access`）；
   - 数据库写操作或读取可能包含敏感字段的数据表。
 
 ### 2. 审核决策层（`src/agent/permissions/reviewer.py`）

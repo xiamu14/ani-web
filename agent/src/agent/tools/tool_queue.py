@@ -7,13 +7,12 @@ from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, override
 
 from pydantic_ai import RunContext
 from pydantic_ai.capabilities import AbstractCapability, WrapToolExecuteHandler
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.tools import ToolDefinition
-from typing_extensions import override
 
 from agent.db import paths_overlap
 from agent.hooks.priority import HookPriority
@@ -37,7 +36,10 @@ _PATH_EXCLUSIVE_TOOLS: frozenset[str] = frozenset(
 )
 _SHELL_EXCLUSIVE_TOOLS: frozenset[str] = frozenset({"shell", "run_command", "start_command"})
 _CMD_HANDLE_TOOLS: frozenset[str] = frozenset({"check_command", "stop_command"})
-_NO_LOCK_TOOLS: frozenset[str] = frozenset({"list_tasks", "inspect_workspace_locks"})
+_NO_LOCK_TOOLS: frozenset[str] = frozenset(
+    {"list_tasks", "inspect_workspace_locks", "load_capability", "search_tools"}
+)
+_NO_LOCK_TOOL_KINDS: frozenset[str] = frozenset({"capability-load", "tool-search"})
 _CONV_EXCLUSIVE_TOOLS: frozenset[str] = frozenset({"set_workspace", "dispatch_role_agent"})
 _TICKET_EXCLUSIVE_TOOLS: frozenset[str] = frozenset({"steer_or_revise_task", "cancel_task"})
 _PATH_ARG_KEYS: tuple[str, ...] = ("path", "file_path", "target_file", "directory", "dir_path")
@@ -75,13 +77,15 @@ def resolve_tool_resource(
     *,
     workspace_root: str | Path | None = None,
     main_conversation_id: str | None = None,
+    tool_kind: str | None = None,
 ) -> ToolResource:
     """对照工具清单表解析资源键与读写锁模式。"""
+    if tool_kind in _NO_LOCK_TOOL_KINDS or tool_name in _NO_LOCK_TOOLS:
+        return ToolResource(kind="none", key="", lock_mode="none")
+
     norm_ws = Path(workspace_root).expanduser().resolve() if workspace_root is not None else None
     conv_id = main_conversation_id or "default"
 
-    if tool_name in _NO_LOCK_TOOLS:
-        return ToolResource(kind="none", key="", lock_mode="none")
     if tool_name in _PATH_SHARED_TOOLS:
         key = _resolve_path_key(_extract_str(args, _PATH_ARG_KEYS), norm_ws)
         return ToolResource(kind="path", key=key, lock_mode="shared")
@@ -190,13 +194,13 @@ class ToolExecutionQueueHook(AbstractCapability[object]):
         args: dict[str, Any],  # pyright: ignore[reportExplicitAny]
         handler: WrapToolExecuteHandler,
     ) -> Any:  # pyright: ignore[reportExplicitAny]
-        _ = tool_def
         main_conv_id = getattr(ctx.deps, "main_conversation_id", None)
         res = resolve_tool_resource(
             call.tool_name,
             args,
             workspace_root=self._workspace_root,
             main_conversation_id=main_conv_id if isinstance(main_conv_id, str) else None,
+            tool_kind=tool_def.tool_kind,
         )
         if res.lock_mode == "none":
             return await handler(args)  # pyright: ignore[reportAny]

@@ -87,6 +87,58 @@ class TestPermissionRules(unittest.TestCase):
                 evaluate_tool_rule("shell", {"command": "python3 -m unittest"}, workspace_root=ws).level,
                 "pass",
             )
+            self.assertEqual(
+                evaluate_tool_rule("shell", {"command": "git diff HEAD~1"}, workspace_root=ws).level,
+                "pass",
+            )
+            self.assertEqual(
+                evaluate_tool_rule("shell", {"command": "python3 scripts/a.py > /dev/null"}, workspace_root=ws).level,
+                "pass",
+            )
+
+    def test_shell_outside_workspace_paths_require_review(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp) / "repo"
+            outside = Path(tmp) / "other"
+            ws.mkdir()
+            outside.mkdir()
+
+            v_home = evaluate_tool_rule(
+                "shell",
+                {"command": "python3 ~/.agent/skills/demo/scripts/run.py"},
+                workspace_root=ws,
+            )
+            self.assertEqual(v_home.level, "review")
+            self.assertEqual(v_home.rule_id, "review.cmd.outside_workspace_access")
+
+            v_parent = evaluate_tool_rule(
+                "shell",
+                {"command": "cat ../other/a.txt"},
+                workspace_root=ws,
+            )
+            self.assertEqual(v_parent.level, "review")
+            self.assertEqual(v_parent.rule_id, "review.cmd.outside_workspace_access")
+
+            v_abs = evaluate_tool_rule(
+                "shell",
+                {"command": f"python3 {outside / 'a.py'}"},
+                workspace_root=ws,
+            )
+            self.assertEqual(v_abs.level, "review")
+            self.assertEqual(v_abs.rule_id, "review.cmd.outside_workspace_access")
+
+    def test_no_workspace_bound_fails_closed(self) -> None:
+        vw = evaluate_tool_rule("write_file", {"path": "a.py"}, workspace_root=None)
+        self.assertEqual(vw.level, "forbid")
+        self.assertEqual(vw.rule_id, "forbid.path.no_workspace_write")
+
+        vr = evaluate_tool_rule("read_file", {"path": "a.py"}, workspace_root=None)
+        self.assertEqual(vr.level, "review")
+        self.assertEqual(vr.rule_id, "review.path.no_workspace_read")
+
+        vs = evaluate_tool_rule("shell", {"command": "python3 -m unittest"}, workspace_root=None)
+        self.assertEqual(vs.level, "review")
+        self.assertEqual(vs.rule_id, "review.cmd.no_workspace_shell")
 
 
 if __name__ == "__main__":

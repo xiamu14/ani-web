@@ -19,10 +19,17 @@
 - **按需激活层**：低频/扩展工具集配置 `defer_loading`，默认仅向模型暴露轻量检索入口；模型检索命中后，由 Pydantic AI 通过增量 `ToolAvailabilityDeltaPart` 动态注入对应工具 Schema，不破坏前序 KV Cache。
 
 ### 2. Skills 渐进披露（基于 `pydantic_ai_harness.skills.Skills`）
-采用三级按需披露并严格遵守 `AGENTS.md` 目录边界：
-- **L1 目录索引（常驻）**：扫描全局 Skill 目录与当前 `work_path` 自身 Skill 目录的 `SKILL.md` frontmatter，仅注入 `name + description` 极简清单。
-- **L2 指令正文（按需）**：任务匹配某 Skill 时，模型调用加载工具读取该 `SKILL.md` 完整步骤，不写入无关分支或持久化的 `context_entries` 历史。
-- **L3 附属资源（按需）**：`scripts/`、`references/`、`examples/` 仅在执行对应步骤时通过 `read_file` 按需读取，受工作区权限与队列锁保护。
+采用三级按需披露并严格遵守 `AGENTS.md` 目录边界（**仅挂载于执行层 Role Agents**，`SuperAgentRouter` 不挂载 Skills，保持 6 核心编排工具与主会话零 Skill 污染）：
+- **三层作用域平等加载与统一渲染**：工作区（`<work_path>/.agent/skills`）、全局（`~/.agent/skills`）、内置（`src/agent/skills`）统一通过公开 API `pydantic_ai_harness.skills.Skills.load()` 解析、校验与安全扫描，封装为 `Capability(defer_loading=True)` + `CombinedCapability` 交付框架 `DeferredCapabilityLoader`。本地运行时三层统一保持 `in_run_workspace=True`（L2 均输出 `Skill directory`），不因是否调用 `set_workspace` 或来源作用域区别对待（未绑定工作区时仅省略工作区层）。
+- **L1 目录索引（常驻）**：注入动态 `instructions`（仅含 `name + description` 及可选 `when_to_use` 极简清单，不含正文步骤）；切换 `work_path` 时在请求尾部增量更新并自动撤回旧工作区已加载 Skill，保持前序 Prefix Cache 稳定。
+- **L2 指令正文（按需）**：任务匹配某 Skill 时，模型调用 `load_capability` 获取该 `SKILL.md` 完整步骤，**仅在 Role 子会话内按需加载**，不写入主会话或无关分支的 `context_entries` 历史。
+- **L3 附属资源（按需）**：`scripts/`、`references/`、`examples/` 仅在执行对应步骤时按需读取，受统一权限规则与队列锁保护。
+- **Skill 零特权与跨工作区权限边界**：
+  - 任何作用域（含全局/内置）的 Skill 均不享有路径白名单，其后续工具调用无差别受 `PermissionGuardHook (0)` 与 `ToolExecutionQueueHook (20)` 约束：
+    - 跨工作区写 → `forbid` 硬拒（需由 Router 通过 `dispatch_role_agent` 另起绑定目标工作区的任务执行）；
+    - 跨工作区读（含全局/内置 Skill L3 附属资源）→ 经 `FORBIDDEN_SENSITIVE_PATH_PATTERNS` 防逃逸后统一走 `review.path.outside_workspace_read`（`Jev` + `UserApprovalPort` 单次 `run_id` 临时授权；Step 6.5 在 `PermissionGuardHook (0)` 保护下解除 `FileSystem` 单根围栏以打通审过放行）；
+    - 跨工作区 `shell` → 命中 `review.cmd.outside_workspace_access`；未绑定工作区 → fail-closed；
+    - `load_capability`（`tool_kind="capability-load"`）在 `ToolExecutionQueueHook` 中归为 `lock_mode="none"`，避免误抢工作区写锁。
 
 ### 3. MCP 渐进披露与懒连接（基于 `pydantic_ai.capabilities.MCP`）
 - **配置边界**：支持合并「全局配置（`~/.agent/mcp.json`）+ 当前工作区自身配置（`<work_path>/.agent/mcp.json`）」，遵循 `AGENTS.md` 边界原则，不向上继承父目录。
@@ -72,7 +79,7 @@ flowchart LR
 ### 1. Skill 去重与版本选择
 - **去重主键**：`SKILL.md` frontmatter 中的 `name`。
 - **跨作用域覆盖**：优先级固定为 **当前工作区（`<work_path>/.agent/skills`） > 用户全局（`~/.agent/skills`） > 应用内置**；项目本地同名 Skill 直接覆盖全局，不用全局高版本逆转项目边界。
-- **同作用域冲突（SemVer 仲裁）**：支持可选 `version` 字段（缺省 `"0.0.0"`）。同一作用域下出现同名 Skill 时优先保留 SemVer 较高版本；同版本则保留先扫描项并在 `skipped` 记录告警，避免向 `Skills` 传入重复定义。
+- **同作用域冲突（SemVer 仲裁）**：同作用域冲突发生在同作用域多目录场景（如工作区 `[".agent/skills", ".agents/skills"]` 或全局多目录）。支持 frontmatter 顶层 `version` 或 `metadata.version`（缺省 `"0.0.0"`，按 SemVer 2.0.0 比较）。同一作用域下出现同名 Skill 时优先保留 SemVer 较高版本；同版本则保留先扫描项并在 `skipped` 记录告警；损坏/无效 `SKILL.md` 先入 `skipped(reason="invalid")`，不遮蔽低版本有效项；被 `ArtifactScanner` 拦截的 `flagged` 项保留占位，防止低优先级副本顶替。
 
 ### 2. `mcpServer` 去重、版本锁定与策略失效
 - **两层去重**：
