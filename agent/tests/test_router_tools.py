@@ -7,7 +7,7 @@ import unittest
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal, cast
+from typing import cast
 
 from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.models.test import TestModel
@@ -22,8 +22,10 @@ from agent.db import (
 )
 from agent.tools import (
     DispatchReceipt,
+    LockMode,
     RouterDeps,
     TaskSummary,
+    WorkspaceLockStatus,
     build_router_toolset,
 )
 from agent.tools.router_tools import (
@@ -48,15 +50,29 @@ class _FakeTaskDispatcher:
         role_name: str,
         mandate: str,
         work_path: str | None,
-        lock_mode: Literal["exclusive", "none"],
+        lock_mode: LockMode | None = None,
+        depends_on: Sequence[str] | None = None,
     ) -> DispatchReceipt:
-        _ = (main_conversation_id, lock_mode)
+        _ = (main_conversation_id, depends_on)
+        effective_lock: LockMode = lock_mode or "exclusive"
         task_id = f"T{len(self.items) + 1}"
         busy = any(t.status == "running" and t.work_path == work_path for t in self.items)
-        status = "queued" if (work_path is not None and lock_mode == "exclusive" and busy) else "running"
-        pos = sum(1 for t in self.items if t.status == "queued" and t.work_path == work_path) + 1 if status == "queued" else 0
+        status = (
+            "queued" if (work_path is not None and effective_lock == "exclusive" and busy) else "running"
+        )
+        pos = (
+            sum(1 for t in self.items if t.status == "queued" and t.work_path == work_path) + 1
+            if status == "queued"
+            else 0
+        )
         self.items.append(
-            TaskSummary(task_id=task_id, role_name=role_name, status=status, work_path=work_path, mandate=mandate)
+            TaskSummary(
+                task_id=task_id,
+                role_name=role_name,
+                status=status,
+                work_path=work_path,
+                mandate=mandate,
+            )
         )
         return DispatchReceipt(task_id=task_id, status=status, queue_position=pos, work_path=work_path)
 
@@ -69,9 +85,21 @@ class _FakeTaskDispatcher:
         self.steered.append((task_id, instruction))
         return f"已向 @{task_id} 注入指令: {instruction}"
 
+    async def cancel_task(self, *, main_conversation_id: str, task_id: str) -> str:
+        _ = main_conversation_id
+        if not any(t.task_id == task_id for t in self.items):
+            raise LookupError(f"任务 @{task_id} 不存在")
+        return f"已取消 @{task_id}"
+
     async def list_tasks(self, main_conversation_id: str) -> Sequence[TaskSummary]:
         _ = main_conversation_id
         return list(self.items)
+
+    async def inspect_workspace_locks(
+        self, work_path: str | None = None
+    ) -> Sequence[WorkspaceLockStatus]:
+        _ = work_path
+        return []
 
 
 def _fake_ctx(deps: RouterDeps) -> RunContext[RouterDeps]:

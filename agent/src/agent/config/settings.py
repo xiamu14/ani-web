@@ -26,7 +26,7 @@ class LlmSettings(BaseSettings):
     logfire_token: str | None = None
     openrouter_api_key: str | None = None
     openrouter_base_url: str = "https://openrouter.ai/api"
-    typesafe_model_name: str = "typesafe/jev-1.14"
+    decision_model_name: str = "typesafe/jev-1.14"
 
 
 def load_settings() -> LlmSettings:

@@ -176,7 +176,7 @@ async def open_runtime(
         JevDecisionClient(
             api_key=settings.openrouter_api_key,
             base_url=settings.openrouter_base_url,
-            model=settings.typesafe_model_name,
+            model=settings.decision_model_name,
         )
         if settings.openrouter_api_key
         else None
