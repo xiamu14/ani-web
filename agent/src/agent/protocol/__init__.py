@@ -1,5 +1,12 @@
 """GUI 外接通信协议包（Layer 0/1：零 Web 框架依赖）。"""
 
+from agent.protocol.accounting import (
+    ContextAccountingHook,
+    build_tree_usage_summary,
+    count_tokens_text,
+    estimate_context_buckets,
+    estimate_model_context_limit,
+)
 from agent.protocol.event_bus import (
     PROTOCOL_EVENT_ADAPTER,
     EventSubscription,
@@ -172,6 +179,7 @@ __all__ = [
     "BranchView",
     "BudgetProgressView",
     "CitationLocatorView",
+    "ContextAccountingHook",
     "ContextBucketCategory",
     "ContextBucketView",
     "ContextSavingsView",
@@ -278,6 +286,10 @@ __all__ = [
     "WorkspaceLocksChangedEvent",
     "WorkspaceLocksChangedPayload",
     "build_events_json_schema",
+    "build_tree_usage_summary",
+    "count_tokens_text",
+    "estimate_context_buckets",
+    "estimate_model_context_limit",
     "make_event_stream_handler",
     "to_run_usage_view",
     "utc_rfc3339",

@@ -159,3 +159,33 @@ class WorkStateRow(SQLModel, table=True):
     fields_json: str = Field(default="{}")
     status: str = Field(default="open")
     created_at_epoch: int
+
+
+class ContextSnapshotRow(SQLModel, table=True):
+    """最近一次 Context Window 分桶占用快照表（context_snapshots）ORM 模型。"""
+
+    __tablename__: ClassVar[str] = "context_snapshots"  # pyright: ignore[reportIncompatibleVariableOverride]
+
+    conversation_id: str = Field(primary_key=True)
+    run_id: str
+    model_name: str
+    window_used_tokens: int = Field(default=0)
+    window_limit_tokens: int | None = Field(default=None)
+    calibrated: int = Field(default=0)
+    snapshot_json: str
+    updated_at: str
+
+
+class ConversationAuxUsageRow(SQLModel, table=True):
+    """Jev 辅助决策模型用量汇总表（conversation_aux_usage）ORM 模型。"""
+
+    __tablename__: ClassVar[str] = "conversation_aux_usage"  # pyright: ignore[reportIncompatibleVariableOverride]
+
+    conversation_id: str = Field(primary_key=True)
+    source: str = Field(primary_key=True)
+    requests: int = Field(default=0)
+    input_tokens: int = Field(default=0)
+    output_tokens: int = Field(default=0)
+    total_tokens: int = Field(default=0)
+    cost_usd: float = Field(default=0.0)
+    updated_at: str

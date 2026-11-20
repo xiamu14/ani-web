@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+import inspect
+from collections.abc import Awaitable, Callable, Mapping
 from typing import cast
 
 import httpx
@@ -39,6 +40,7 @@ class JevHttpClient:
         max_retries: int = 3,
         base_delay_sec: float = 0.2,
         cooldown_gate: RateLimitCooldownGate | None = None,
+        on_usage: Callable[[Mapping[str, object]], object] | None = None,
     ) -> None:
         self._api_key: str = api_key
         self._url: str = build_decisions_url(base_url)
@@ -55,6 +57,7 @@ class JevHttpClient:
             else RateLimitCooldownGate(base_delay_sec=base_delay_sec)
         )
         self._stats: ConcurrencyPoolStats = ConcurrencyPoolStats()
+        self._on_usage: Callable[[Mapping[str, object]], object] | None = on_usage
 
     @property
     def decisions_url(self) -> str:
@@ -137,6 +140,11 @@ class JevHttpClient:
                         span.set_attribute("response_model", data.get("model"))
                         span.set_attribute("usage", data.get("usage"))
                         span.set_attribute("answers", data.get("answers"))
+                        raw_usage = data.get("usage")
+                        if self._on_usage is not None and isinstance(raw_usage, Mapping):
+                            maybe = self._on_usage(cast(Mapping[str, object], raw_usage))
+                            if inspect.isawaitable(maybe):
+                                _ = await cast(Awaitable[object], maybe)
                         return data
                 finally:
                     self._stats.on_exit()

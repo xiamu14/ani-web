@@ -209,6 +209,29 @@ CREATE TABLE IF NOT EXISTS work_states (
 
 CREATE INDEX IF NOT EXISTS idx_work_states_project_epoch
     ON work_states(project_key, created_at_epoch ASC, id ASC);
+
+CREATE TABLE IF NOT EXISTS context_snapshots (
+    conversation_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    model_name TEXT NOT NULL,
+    window_used_tokens INTEGER NOT NULL DEFAULT 0,
+    window_limit_tokens INTEGER,
+    calibrated INTEGER NOT NULL DEFAULT 0 CHECK (calibrated IN (0, 1)),
+    snapshot_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS conversation_aux_usage (
+    conversation_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    requests INTEGER NOT NULL DEFAULT 0,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_usd REAL NOT NULL DEFAULT 0.0,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (conversation_id, source)
+);
 """
 
 

@@ -24,6 +24,8 @@ from agent.db.memory_store import SQLModelMemoryStore
 from agent.db.models import (
     AppStateRow,
     ContextEntryRow,
+    ContextSnapshotRow,
+    ConversationAuxUsageRow,
     ConversationRow,
     McpToolPolicyRow,
     ObservationRow,
@@ -34,6 +36,14 @@ from agent.db.models import (
 from agent.db.schema import SCHEMA_SQL, SCHEMA_VERSION, init_schema
 from agent.db.sqlite import connect_sqlite, default_db_path, open_database
 from agent.db.ticket_store import SQLModelTicketStore, parse_depends_on, paths_overlap
+from agent.db.tree_queries import (
+    EntryPageData,
+    EntryPartData,
+    EntryRecordData,
+    SQLModelProtocolStore,
+    TreeBranchRecord,
+    TreeTopologyData,
+)
 
 __all__ = [
     "DEFAULT_MEDIA_THRESHOLD_BYTES",
@@ -46,15 +56,23 @@ __all__ = [
     "AppStateRow",
     "CompressedFileMediaStore",
     "ContextEntryRow",
+    "ContextSnapshotRow",
+    "ConversationAuxUsageRow",
     "ConversationRow",
+    "EntryPageData",
+    "EntryPartData",
+    "EntryRecordData",
     "McpToolPolicyRow",
     "ObservationRow",
     "SQLModelConversationStore",
     "SQLModelMcpPolicyStore",
     "SQLModelMemoryStore",
+    "SQLModelProtocolStore",
     "SQLModelTicketStore",
     "SessionSummaryRow",
     "TicketRow",
+    "TreeBranchRecord",
+    "TreeTopologyData",
     "WorkStateRow",
     "connect_sqlite",
     "create_session_factory",
