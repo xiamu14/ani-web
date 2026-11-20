@@ -212,7 +212,8 @@ def estimate_context_buckets(
     params = request_context.model_request_parameters
 
     for ipart in params.instruction_parts or ():
-        part_id = getattr(ipart, "id", None) or getattr(ipart, "name", None) or ""
+        raw_part_id: object = getattr(ipart, "id", None) or getattr(ipart, "name", None) or ""
+        part_id = str(raw_part_id) if raw_part_id else ""
         content = getattr(ipart, "content", "")
         if not isinstance(content, str):
             continue

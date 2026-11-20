@@ -1,0 +1,5648 @@
+{
+  "$defs": {
+    "ActiveToolView": {
+      "additionalProperties": false,
+      "description": "当前正在执行的工具状态。",
+      "properties": {
+        "tool_call_id": {
+          "title": "Tool Call Id",
+          "type": "string"
+        },
+        "tool_name": {
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "args_preview": {
+          "default": "",
+          "title": "Args Preview",
+          "type": "string"
+        },
+        "started_at": {
+          "title": "Started At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_call_id",
+        "tool_name",
+        "started_at"
+      ],
+      "title": "ActiveToolView",
+      "type": "object"
+    },
+    "ApprovalContextView": {
+      "additionalProperties": false,
+      "description": "审批请求所属会话与任务上下文。",
+      "properties": {
+        "main_conversation_id": {
+          "title": "Main Conversation Id",
+          "type": "string"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "user_intent": {
+          "default": "",
+          "title": "User Intent",
+          "type": "string"
+        }
+      },
+      "required": [
+        "main_conversation_id",
+        "run_id"
+      ],
+      "title": "ApprovalContextView",
+      "type": "object"
+    },
+    "ApprovalItemView": {
+      "additionalProperties": false,
+      "description": "待逐条勾选审核的单个工具调用描述。",
+      "properties": {
+        "item_id": {
+          "title": "Item Id",
+          "type": "string"
+        },
+        "tool_name": {
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "args": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Args",
+          "type": "object"
+        },
+        "category": {
+          "title": "Category",
+          "type": "string"
+        },
+        "rule_id": {
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "risk_level": {
+          "default": "medium",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Risk Level",
+          "type": "string"
+        }
+      },
+      "required": [
+        "item_id",
+        "tool_name",
+        "category",
+        "rule_id",
+        "reason"
+      ],
+      "title": "ApprovalItemView",
+      "type": "object"
+    },
+    "ApprovalPayloadView": {
+      "additionalProperties": false,
+      "description": "权限审核交互详情。",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ApprovalItemView"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "context": {
+          "$ref": "#/$defs/ApprovalContextView"
+        }
+      },
+      "required": [
+        "items",
+        "context"
+      ],
+      "title": "ApprovalPayloadView",
+      "type": "object"
+    },
+    "ArtifactUpdatedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "artifact.updated",
+          "default": "artifact.updated",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/ArtifactUpdatedPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "ArtifactUpdatedEvent",
+      "type": "object"
+    },
+    "ArtifactUpdatedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {
+          "$ref": "#/$defs/ArtifactView"
+        }
+      },
+      "required": [
+        "artifact"
+      ],
+      "title": "ArtifactUpdatedPayload",
+      "type": "object"
+    },
+    "ArtifactView": {
+      "additionalProperties": false,
+      "description": "跨 Role 内部产物/状态变量视图。",
+      "properties": {
+        "artifact_id": {
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "scope": {
+          "title": "Scope",
+          "type": "string"
+        },
+        "byte_size": {
+          "title": "Byte Size",
+          "type": "integer"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "reference_handle": {
+          "title": "Reference Handle",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonValue"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "artifact_id",
+        "scope",
+        "byte_size",
+        "sha256",
+        "reference_handle"
+      ],
+      "title": "ArtifactView",
+      "type": "object"
+    },
+    "AskUserOptionView": {
+      "additionalProperties": false,
+      "description": "AskUser 单个可选项。",
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "label"
+      ],
+      "title": "AskUserOptionView",
+      "type": "object"
+    },
+    "AskUserPayloadView": {
+      "additionalProperties": false,
+      "description": "LLM 选择建议问答交互详情。",
+      "properties": {
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "questions": {
+          "items": {
+            "$ref": "#/$defs/AskUserQuestionView"
+          },
+          "title": "Questions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id",
+        "questions"
+      ],
+      "title": "AskUserPayloadView",
+      "type": "object"
+    },
+    "AskUserQuestionView": {
+      "additionalProperties": false,
+      "description": "AskUser 单个问题。",
+      "properties": {
+        "header": {
+          "title": "Header",
+          "type": "string"
+        },
+        "question": {
+          "title": "Question",
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/AskUserOptionView"
+          },
+          "title": "Options",
+          "type": "array"
+        },
+        "multi_select": {
+          "default": false,
+          "title": "Multi Select",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "header",
+        "question",
+        "options"
+      ],
+      "title": "AskUserQuestionView",
+      "type": "object"
+    },
+    "AttachmentRegisteredEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "attachment.registered",
+          "default": "attachment.registered",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/AttachmentRegisteredPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "AttachmentRegisteredEvent",
+      "type": "object"
+    },
+    "AttachmentRegisteredPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "attachment": {
+          "$ref": "#/$defs/AttachmentView"
+        }
+      },
+      "required": [
+        "attachment"
+      ],
+      "title": "AttachmentRegisteredPayload",
+      "type": "object"
+    },
+    "AttachmentView": {
+      "additionalProperties": false,
+      "description": "附件元数据视图。",
+      "properties": {
+        "attachment_id": {
+          "title": "Attachment Id",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "media_type": {
+          "title": "Media Type",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "image",
+            "audio",
+            "video",
+            "document",
+            "binary"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "byte_size": {
+          "title": "Byte Size",
+          "type": "integer"
+        },
+        "page_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Count"
+        },
+        "duration_sec": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration Sec"
+        },
+        "width": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Width"
+        },
+        "height": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Height"
+        },
+        "summary": {
+          "default": "",
+          "title": "Summary",
+          "type": "string"
+        },
+        "reference_handle": {
+          "title": "Reference Handle",
+          "type": "string"
+        },
+        "content_url": {
+          "title": "Content Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "attachment_id",
+        "sha256",
+        "title",
+        "media_type",
+        "kind",
+        "byte_size",
+        "reference_handle",
+        "content_url"
+      ],
+      "title": "AttachmentView",
+      "type": "object"
+    },
+    "AuxJevUsageView": {
+      "additionalProperties": false,
+      "description": "Jev 辅助决策模型用量（独立列项，不混入主模型窗口与账单）。",
+      "properties": {
+        "source": {
+          "enum": [
+            "semantic_router",
+            "permission_review",
+            "mcp_compile",
+            "other"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "requests": {
+          "default": 0,
+          "title": "Requests",
+          "type": "integer"
+        },
+        "input_tokens": {
+          "default": 0,
+          "title": "Input Tokens",
+          "type": "integer"
+        },
+        "output_tokens": {
+          "default": 0,
+          "title": "Output Tokens",
+          "type": "integer"
+        },
+        "total_tokens": {
+          "default": 0,
+          "title": "Total Tokens",
+          "type": "integer"
+        },
+        "cost_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cost Usd"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "AuxJevUsageView",
+      "type": "object"
+    },
+    "BranchView": {
+      "additionalProperties": false,
+      "description": "Level 1 宏观分支树节点视图。",
+      "properties": {
+        "conversation_id": {
+          "title": "Conversation Id",
+          "type": "string"
+        },
+        "scope": {
+          "title": "Scope",
+          "type": "string"
+        },
+        "parent_conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Conversation Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "target_title": {
+          "default": "",
+          "title": "Target Title",
+          "type": "string"
+        },
+        "work_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Work Path"
+        },
+        "branch_mode": {
+          "default": "root_only",
+          "enum": [
+            "root",
+            "root_only",
+            "handoff",
+            "full_fork"
+          ],
+          "title": "Branch Mode",
+          "type": "string"
+        },
+        "forked_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Forked From"
+        },
+        "forked_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Forked At"
+        },
+        "head_entry_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Head Entry Id"
+        },
+        "status": {
+          "default": "idle",
+          "title": "Status",
+          "type": "string"
+        },
+        "is_running": {
+          "default": false,
+          "title": "Is Running",
+          "type": "boolean"
+        },
+        "message_count": {
+          "default": 0,
+          "title": "Message Count",
+          "type": "integer"
+        },
+        "active_task_count": {
+          "default": 0,
+          "title": "Active Task Count",
+          "type": "integer"
+        },
+        "pending_interaction_count": {
+          "default": 0,
+          "title": "Pending Interaction Count",
+          "type": "integer"
+        },
+        "usage_summary": {
+          "$ref": "#/$defs/RunUsageView"
+        },
+        "updated_at": {
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "conversation_id",
+        "scope",
+        "updated_at"
+      ],
+      "title": "BranchView",
+      "type": "object"
+    },
+    "BudgetProgressView": {
+      "additionalProperties": false,
+      "description": "对照 LoopBudgetPolicy 的预算消耗水位。",
+      "properties": {
+        "requests_ratio": {
+          "default": 0.0,
+          "title": "Requests Ratio",
+          "type": "number"
+        },
+        "tool_calls_ratio": {
+          "default": 0.0,
+          "title": "Tool Calls Ratio",
+          "type": "number"
+        },
+        "tokens_ratio": {
+          "default": 0.0,
+          "title": "Tokens Ratio",
+          "type": "number"
+        },
+        "soft_limit_reached": {
+          "default": false,
+          "title": "Soft Limit Reached",
+          "type": "boolean"
+        }
+      },
+      "title": "BudgetProgressView",
+      "type": "object"
+    },
+    "CitationLocatorView": {
+      "additionalProperties": false,
+      "description": "溯源物理定位器。",
+      "properties": {
+        "page": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page"
+        },
+        "line_start": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Start"
+        },
+        "line_end": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line End"
+        },
+        "time_start_sec": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Time Start Sec"
+        },
+        "time_end_sec": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Time End Sec"
+        },
+        "bbox": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bbox"
+        },
+        "artifact_key_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Key Path"
+        }
+      },
+      "title": "CitationLocatorView",
+      "type": "object"
+    },
+    "ContextBucketView": {
+      "additionalProperties": false,
+      "description": "Context Window 9 大分类桶之一。",
+      "properties": {
+        "category": {
+          "enum": [
+            "system_prompt",
+            "environment_info",
+            "skills",
+            "mcp",
+            "builtin_tools",
+            "memory",
+            "attachments",
+            "messages",
+            "overhead"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "tokens": {
+          "title": "Tokens",
+          "type": "integer"
+        },
+        "ratio": {
+          "title": "Ratio",
+          "type": "number"
+        },
+        "sub_items": {
+          "items": {
+            "$ref": "#/$defs/ContextSubItemView"
+          },
+          "title": "Sub Items",
+          "type": "array"
+        }
+      },
+      "required": [
+        "category",
+        "tokens",
+        "ratio"
+      ],
+      "title": "ContextBucketView",
+      "type": "object"
+    },
+    "ContextSavingsView": {
+      "additionalProperties": false,
+      "description": "延迟加载与 OPT-6 窗口优化省流指标。",
+      "properties": {
+        "deferred_mcp_tools_count": {
+          "default": 0,
+          "title": "Deferred Mcp Tools Count",
+          "type": "integer"
+        },
+        "deferred_mcp_tokens_saved_est": {
+          "default": 0,
+          "title": "Deferred Mcp Tokens Saved Est",
+          "type": "integer"
+        },
+        "deferred_skills_count": {
+          "default": 0,
+          "title": "Deferred Skills Count",
+          "type": "integer"
+        },
+        "deferred_skills_tokens_saved_est": {
+          "default": 0,
+          "title": "Deferred Skills Tokens Saved Est",
+          "type": "integer"
+        },
+        "opt6_omitted_media_count": {
+          "default": 0,
+          "title": "Opt6 Omitted Media Count",
+          "type": "integer"
+        }
+      },
+      "title": "ContextSavingsView",
+      "type": "object"
+    },
+    "ContextSnapshotEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "context.snapshot",
+          "default": "context.snapshot",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/ContextSnapshotPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "ContextSnapshotEvent",
+      "type": "object"
+    },
+    "ContextSnapshotPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "snapshot": {
+          "$ref": "#/$defs/ContextWindowSnapshotView"
+        }
+      },
+      "required": [
+        "snapshot"
+      ],
+      "title": "ContextSnapshotPayload",
+      "type": "object"
+    },
+    "ContextSubItemView": {
+      "additionalProperties": false,
+      "description": "单个分类桶内部的细分子项消耗。",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "tokens": {
+          "title": "Tokens",
+          "type": "integer"
+        },
+        "detail": {
+          "default": "",
+          "title": "Detail",
+          "type": "string"
+        },
+        "scaled": {
+          "default": false,
+          "title": "Scaled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "tokens"
+      ],
+      "title": "ContextSubItemView",
+      "type": "object"
+    },
+    "ContextWindowSnapshotView": {
+      "additionalProperties": false,
+      "description": "单次模型请求的上下文窗口占用快照（Layer A）。",
+      "properties": {
+        "conversation_id": {
+          "title": "Conversation Id",
+          "type": "string"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "model_name": {
+          "title": "Model Name",
+          "type": "string"
+        },
+        "window_used_tokens": {
+          "title": "Window Used Tokens",
+          "type": "integer"
+        },
+        "window_limit_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Window Limit Tokens"
+        },
+        "limit_known": {
+          "default": false,
+          "title": "Limit Known",
+          "type": "boolean"
+        },
+        "utilization_ratio": {
+          "default": 0.0,
+          "title": "Utilization Ratio",
+          "type": "number"
+        },
+        "cache_hit_ratio": {
+          "default": 0.0,
+          "title": "Cache Hit Ratio",
+          "type": "number"
+        },
+        "uncached_input_tokens": {
+          "default": 0,
+          "title": "Uncached Input Tokens",
+          "type": "integer"
+        },
+        "calibrated": {
+          "default": false,
+          "title": "Calibrated",
+          "type": "boolean"
+        },
+        "tokenizer_name": {
+          "default": "o200k_base",
+          "title": "Tokenizer Name",
+          "type": "string"
+        },
+        "estimation_delta": {
+          "default": 0,
+          "title": "Estimation Delta",
+          "type": "integer"
+        },
+        "categories": {
+          "items": {
+            "$ref": "#/$defs/ContextBucketView"
+          },
+          "title": "Categories",
+          "type": "array"
+        },
+        "savings": {
+          "$ref": "#/$defs/ContextSavingsView"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        }
+      },
+      "required": [
+        "conversation_id",
+        "run_id",
+        "model_name",
+        "window_used_tokens",
+        "ts"
+      ],
+      "title": "ContextWindowSnapshotView",
+      "type": "object"
+    },
+    "EntryPartView": {
+      "additionalProperties": false,
+      "description": "Level 2 消息节点内的轻量 Part 视图（大媒体仅传引用）。",
+      "properties": {
+        "part_kind": {
+          "title": "Part Kind",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        },
+        "tool_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Name"
+        },
+        "tool_call_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Call Id"
+        },
+        "attachment_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attachment Id"
+        },
+        "content_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Url"
+        }
+      },
+      "required": [
+        "part_kind",
+        "role"
+      ],
+      "title": "EntryPartView",
+      "type": "object"
+    },
+    "EntryView": {
+      "additionalProperties": false,
+      "description": "Level 2 微观 ContextEntry DAG 节点。",
+      "properties": {
+        "entry_id": {
+          "title": "Entry Id",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "kind": {
+          "enum": [
+            "root",
+            "conv_init",
+            "message",
+            "handoff"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "stop_backtrack": {
+          "default": false,
+          "title": "Stop Backtrack",
+          "type": "boolean"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "parts": {
+          "items": {
+            "$ref": "#/$defs/EntryPartView"
+          },
+          "title": "Parts",
+          "type": "array"
+        },
+        "child_branch_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Child Branch Ids",
+          "type": "array"
+        },
+        "attached_task_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Attached Task Ids",
+          "type": "array"
+        },
+        "created_at": {
+          "title": "Created At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entry_id",
+        "kind",
+        "created_at"
+      ],
+      "title": "EntryView",
+      "type": "object"
+    },
+    "InteractionCancelledEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "interaction.cancelled",
+          "default": "interaction.cancelled",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/InteractionCancelledPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "InteractionCancelledEvent",
+      "type": "object"
+    },
+    "InteractionCancelledPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "interaction_id": {
+          "title": "Interaction Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "approval",
+            "ask_user",
+            "mcp_elicitation"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "run_cancelled",
+            "timed_out",
+            "shutdown"
+          ],
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "interaction_id",
+        "kind",
+        "reason"
+      ],
+      "title": "InteractionCancelledPayload",
+      "type": "object"
+    },
+    "InteractionRequestedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "interaction.requested",
+          "default": "interaction.requested",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/InteractionRequestedPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "InteractionRequestedEvent",
+      "type": "object"
+    },
+    "InteractionRequestedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "interaction": {
+          "$ref": "#/$defs/InteractionView"
+        }
+      },
+      "required": [
+        "interaction"
+      ],
+      "title": "InteractionRequestedPayload",
+      "type": "object"
+    },
+    "InteractionResolvedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "interaction.resolved",
+          "default": "interaction.resolved",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/InteractionResolvedPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "InteractionResolvedEvent",
+      "type": "object"
+    },
+    "InteractionResolvedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "interaction_id": {
+          "title": "Interaction Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "approval",
+            "ask_user",
+            "mcp_elicitation"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "resolution_summary": {
+          "default": "",
+          "title": "Resolution Summary",
+          "type": "string"
+        },
+        "resolved_by": {
+          "default": "user",
+          "title": "Resolved By",
+          "type": "string"
+        }
+      },
+      "required": [
+        "interaction_id",
+        "kind"
+      ],
+      "title": "InteractionResolvedPayload",
+      "type": "object"
+    },
+    "InteractionView": {
+      "additionalProperties": false,
+      "description": "统一交互挂起卡片视图。",
+      "properties": {
+        "interaction_id": {
+          "title": "Interaction Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "approval",
+            "ask_user",
+            "mcp_elicitation"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "status": {
+          "default": "pending",
+          "enum": [
+            "pending",
+            "resolved",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "conversation_id": {
+          "title": "Conversation Id",
+          "type": "string"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "created_at": {
+          "title": "Created At",
+          "type": "string"
+        },
+        "approval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalPayloadView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ask_user": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AskUserPayloadView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "mcp_elicitation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpElicitationPayloadView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "interaction_id",
+        "kind",
+        "conversation_id",
+        "created_at"
+      ],
+      "title": "InteractionView",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "LlmPoolStatusEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "llm.pool_status",
+          "default": "llm.pool_status",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/LlmPoolStatusPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "LlmPoolStatusEvent",
+      "type": "object"
+    },
+    "LlmPoolStatusPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "pool_status": {
+          "$ref": "#/$defs/LlmPoolStatusView"
+        }
+      },
+      "required": [
+        "pool_status"
+      ],
+      "title": "LlmPoolStatusPayload",
+      "type": "object"
+    },
+    "LlmPoolStatusView": {
+      "additionalProperties": false,
+      "description": "全局 LLM 并发池与 429 冷却状态。",
+      "properties": {
+        "router_pool": {
+          "$ref": "#/$defs/PoolStatsView"
+        },
+        "role_pool": {
+          "$ref": "#/$defs/PoolStatsView"
+        },
+        "jev_pool": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PoolStatsView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cooldown_remaining_sec": {
+          "default": 0.0,
+          "title": "Cooldown Remaining Sec",
+          "type": "number"
+        },
+        "total_429_hits": {
+          "default": 0,
+          "title": "Total 429 Hits",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "router_pool",
+        "role_pool"
+      ],
+      "title": "LlmPoolStatusView",
+      "type": "object"
+    },
+    "McpElicitationPayloadView": {
+      "additionalProperties": false,
+      "description": "MCP Server 发起的交互式表单请求。",
+      "properties": {
+        "server_name": {
+          "title": "Server Name",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "requested_schema": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Requested Schema",
+          "type": "object"
+        }
+      },
+      "required": [
+        "server_name",
+        "message"
+      ],
+      "title": "McpElicitationPayloadView",
+      "type": "object"
+    },
+    "MessagePartDeltaEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "message.part.delta",
+          "default": "message.part.delta",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/MessagePartDeltaPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "MessagePartDeltaEvent",
+      "type": "object"
+    },
+    "MessagePartDeltaPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "part_index": {
+          "title": "Part Index",
+          "type": "integer"
+        },
+        "part_kind": {
+          "enum": [
+            "text",
+            "thinking",
+            "tool_call",
+            "tool_result",
+            "file",
+            "system_notice"
+          ],
+          "title": "Part Kind",
+          "type": "string"
+        },
+        "delta": {
+          "title": "Delta",
+          "type": "string"
+        },
+        "tool_call_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Call Id"
+        },
+        "proactive": {
+          "default": false,
+          "title": "Proactive",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "part_index",
+        "part_kind",
+        "delta"
+      ],
+      "title": "MessagePartDeltaPayload",
+      "type": "object"
+    },
+    "MessagePartEndEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "message.part.end",
+          "default": "message.part.end",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/MessagePartEndPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "MessagePartEndEvent",
+      "type": "object"
+    },
+    "MessagePartEndPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "part_index": {
+          "title": "Part Index",
+          "type": "integer"
+        },
+        "part_kind": {
+          "enum": [
+            "text",
+            "thinking",
+            "tool_call",
+            "tool_result",
+            "file",
+            "system_notice"
+          ],
+          "title": "Part Kind",
+          "type": "string"
+        },
+        "tool_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Name"
+        },
+        "tool_call_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Call Id"
+        },
+        "args_preview": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Args Preview"
+        },
+        "result_preview": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Result Preview"
+        },
+        "is_error": {
+          "default": false,
+          "title": "Is Error",
+          "type": "boolean"
+        },
+        "proactive": {
+          "default": false,
+          "title": "Proactive",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "part_index",
+        "part_kind"
+      ],
+      "title": "MessagePartEndPayload",
+      "type": "object"
+    },
+    "MessagePartStartEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "message.part.start",
+          "default": "message.part.start",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/MessagePartStartPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "MessagePartStartEvent",
+      "type": "object"
+    },
+    "MessagePartStartPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "part_index": {
+          "title": "Part Index",
+          "type": "integer"
+        },
+        "part_kind": {
+          "enum": [
+            "text",
+            "thinking",
+            "tool_call",
+            "tool_result",
+            "file",
+            "system_notice"
+          ],
+          "title": "Part Kind",
+          "type": "string"
+        },
+        "tool_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Name"
+        },
+        "tool_call_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Call Id"
+        },
+        "attachment_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attachment Id"
+        },
+        "proactive": {
+          "default": false,
+          "title": "Proactive",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "part_index",
+        "part_kind"
+      ],
+      "title": "MessagePartStartPayload",
+      "type": "object"
+    },
+    "PoolStatsView": {
+      "additionalProperties": false,
+      "description": "单个 LLM 限流池水位。",
+      "properties": {
+        "current_in_flight": {
+          "default": 0,
+          "title": "Current In Flight",
+          "type": "integer"
+        },
+        "peak_in_flight": {
+          "default": 0,
+          "title": "Peak In Flight",
+          "type": "integer"
+        },
+        "total_requests": {
+          "default": 0,
+          "title": "Total Requests",
+          "type": "integer"
+        },
+        "rate_limit_retries": {
+          "default": 0,
+          "title": "Rate Limit Retries",
+          "type": "integer"
+        }
+      },
+      "title": "PoolStatsView",
+      "type": "object"
+    },
+    "RecoveredBranchView": {
+      "additionalProperties": false,
+      "description": "启动恢复的任务摘要。",
+      "properties": {
+        "main_conversation_id": {
+          "title": "Main Conversation Id",
+          "type": "string"
+        },
+        "interrupted_task_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Interrupted Task Ids",
+          "type": "array"
+        },
+        "requeued_task_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Requeued Task Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "main_conversation_id"
+      ],
+      "title": "RecoveredBranchView",
+      "type": "object"
+    },
+    "RoleTaskUsageItemView": {
+      "additionalProperties": false,
+      "description": "单个 Role Task 的用量明细。",
+      "properties": {
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "role_name": {
+          "title": "Role Name",
+          "type": "string"
+        },
+        "usage": {
+          "$ref": "#/$defs/RunUsageView"
+        }
+      },
+      "required": [
+        "task_id",
+        "role_name",
+        "usage"
+      ],
+      "title": "RoleTaskUsageItemView",
+      "type": "object"
+    },
+    "RunCompletedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "run.completed",
+          "default": "run.completed",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/RunCompletedPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "RunCompletedEvent",
+      "type": "object"
+    },
+    "RunCompletedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "output_text": {
+          "title": "Output Text",
+          "type": "string"
+        },
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/VerifiedCitationView"
+          },
+          "title": "Citations",
+          "type": "array"
+        },
+        "suggested_actions": {
+          "items": {
+            "$ref": "#/$defs/SuggestedAction"
+          },
+          "title": "Suggested Actions",
+          "type": "array"
+        },
+        "usage": {
+          "$ref": "#/$defs/RunUsageView"
+        },
+        "head_entry_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Head Entry Id"
+        },
+        "proactive": {
+          "default": false,
+          "title": "Proactive",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "output_text"
+      ],
+      "title": "RunCompletedPayload",
+      "type": "object"
+    },
+    "RunFailedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "run.failed",
+          "default": "run.failed",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/RunFailedPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "RunFailedEvent",
+      "type": "object"
+    },
+    "RunFailedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "error_code": {
+          "title": "Error Code",
+          "type": "string"
+        },
+        "error_message": {
+          "title": "Error Message",
+          "type": "string"
+        },
+        "abort_kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Abort Kind"
+        },
+        "suggested_actions": {
+          "items": {
+            "$ref": "#/$defs/SuggestedAction"
+          },
+          "title": "Suggested Actions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "error_code",
+        "error_message"
+      ],
+      "title": "RunFailedPayload",
+      "type": "object"
+    },
+    "RunInterruptedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "run.interrupted",
+          "default": "run.interrupted",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/RunInterruptedPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "RunInterruptedEvent",
+      "type": "object"
+    },
+    "RunInterruptedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "enum": [
+            "user_interrupt",
+            "shutdown",
+            "task_cancelled"
+          ],
+          "title": "Reason",
+          "type": "string"
+        },
+        "repaired_message_count": {
+          "default": 0,
+          "title": "Repaired Message Count",
+          "type": "integer"
+        },
+        "head_entry_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Head Entry Id"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "title": "RunInterruptedPayload",
+      "type": "object"
+    },
+    "RunStartedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "run.started",
+          "default": "run.started",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/RunStartedPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "RunStartedEvent",
+      "type": "object"
+    },
+    "RunStartedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_kind": {
+          "enum": [
+            "router",
+            "role"
+          ],
+          "title": "Agent Kind",
+          "type": "string"
+        },
+        "proactive": {
+          "default": false,
+          "title": "Proactive",
+          "type": "boolean"
+        },
+        "entry_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Entry Id"
+        },
+        "user_message_preview": {
+          "default": "",
+          "title": "User Message Preview",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_kind"
+      ],
+      "title": "RunStartedPayload",
+      "type": "object"
+    },
+    "RunUsageView": {
+      "additionalProperties": false,
+      "description": "单次 Run / Task 的累计用量（Layer B，严格遵循 UsageBase.input_tokens 包含式口径）。",
+      "properties": {
+        "input_tokens": {
+          "default": 0,
+          "title": "Input Tokens",
+          "type": "integer"
+        },
+        "cache_read_tokens": {
+          "default": 0,
+          "title": "Cache Read Tokens",
+          "type": "integer"
+        },
+        "cache_write_tokens": {
+          "default": 0,
+          "title": "Cache Write Tokens",
+          "type": "integer"
+        },
+        "output_tokens": {
+          "default": 0,
+          "title": "Output Tokens",
+          "type": "integer"
+        },
+        "output_reasoning_tokens": {
+          "default": 0,
+          "title": "Output Reasoning Tokens",
+          "type": "integer"
+        },
+        "total_tokens": {
+          "default": 0,
+          "title": "Total Tokens",
+          "type": "integer"
+        },
+        "cost_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cost Usd"
+        },
+        "requests": {
+          "default": 0,
+          "title": "Requests",
+          "type": "integer"
+        },
+        "tool_calls": {
+          "default": 0,
+          "title": "Tool Calls",
+          "type": "integer"
+        },
+        "budget_progress": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BudgetProgressView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "RunUsageView",
+      "type": "object"
+    },
+    "RuntimeReadyEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "runtime.ready",
+          "default": "runtime.ready",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/RuntimeReadyPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "RuntimeReadyEvent",
+      "type": "object"
+    },
+    "RuntimeReadyPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "latest_seq": {
+          "title": "Latest Seq",
+          "type": "integer"
+        },
+        "active_conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Active Conversation Id"
+        },
+        "model_name": {
+          "title": "Model Name",
+          "type": "string"
+        },
+        "trusted_local": {
+          "title": "Trusted Local",
+          "type": "boolean"
+        },
+        "subscription_id": {
+          "title": "Subscription Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "latest_seq",
+        "model_name",
+        "trusted_local",
+        "subscription_id"
+      ],
+      "title": "RuntimeReadyPayload",
+      "type": "object"
+    },
+    "RuntimeRecoveryEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "runtime.recovery",
+          "default": "runtime.recovery",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/RuntimeRecoveryPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "RuntimeRecoveryEvent",
+      "type": "object"
+    },
+    "RuntimeRecoveryPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "recovered_branches": {
+          "items": {
+            "$ref": "#/$defs/RecoveredBranchView"
+          },
+          "title": "Recovered Branches",
+          "type": "array"
+        }
+      },
+      "title": "RuntimeRecoveryPayload",
+      "type": "object"
+    },
+    "StreamResyncRequiredEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "stream.resync_required",
+          "default": "stream.resync_required",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/StreamResyncRequiredPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "StreamResyncRequiredEvent",
+      "type": "object"
+    },
+    "StreamResyncRequiredPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "requested_after_seq": {
+          "title": "Requested After Seq",
+          "type": "integer"
+        },
+        "oldest_available_seq": {
+          "title": "Oldest Available Seq",
+          "type": "integer"
+        },
+        "latest_seq": {
+          "title": "Latest Seq",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "requested_after_seq",
+        "oldest_available_seq",
+        "latest_seq"
+      ],
+      "title": "StreamResyncRequiredPayload",
+      "type": "object"
+    },
+    "SuggestedAction": {
+      "additionalProperties": false,
+      "description": "非阻塞快捷操作建议（区别于阻塞式 AskUser）。",
+      "properties": {
+        "action_id": {
+          "title": "Action Id",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "action_type": {
+          "enum": [
+            "steer",
+            "cancel",
+            "fork",
+            "switch",
+            "send_message"
+          ],
+          "title": "Action Type",
+          "type": "string"
+        },
+        "conversation_id": {
+          "title": "Conversation Id",
+          "type": "string"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "payload": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Payload",
+          "type": "object"
+        }
+      },
+      "required": [
+        "action_id",
+        "label",
+        "action_type",
+        "conversation_id"
+      ],
+      "title": "SuggestedAction",
+      "type": "object"
+    },
+    "TaskCreatedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "task.created",
+          "default": "task.created",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/TaskCreatedPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "TaskCreatedEvent",
+      "type": "object"
+    },
+    "TaskCreatedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "task": {
+          "$ref": "#/$defs/TaskView"
+        }
+      },
+      "required": [
+        "task"
+      ],
+      "title": "TaskCreatedPayload",
+      "type": "object"
+    },
+    "TaskProgressEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "task.progress",
+          "default": "task.progress",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/TaskProgressPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "TaskProgressEvent",
+      "type": "object"
+    },
+    "TaskProgressPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "live_phase": {
+          "enum": [
+            "waiting_dependency",
+            "acquiring_lock",
+            "thinking",
+            "calling_tool",
+            "waiting_approval",
+            "waiting_user",
+            "retrying_rate_limit",
+            "wrapping_up",
+            "settled"
+          ],
+          "title": "Live Phase",
+          "type": "string"
+        },
+        "current_step": {
+          "default": 0,
+          "title": "Current Step",
+          "type": "integer"
+        },
+        "max_requests": {
+          "default": 35,
+          "title": "Max Requests",
+          "type": "integer"
+        },
+        "tool_calls_count": {
+          "default": 0,
+          "title": "Tool Calls Count",
+          "type": "integer"
+        },
+        "max_tool_calls": {
+          "default": 80,
+          "title": "Max Tool Calls",
+          "type": "integer"
+        },
+        "soft_limit_triggered": {
+          "default": false,
+          "title": "Soft Limit Triggered",
+          "type": "boolean"
+        },
+        "active_tool": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActiveToolView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "recent_step": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolStepSummaryView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "task_id",
+        "live_phase"
+      ],
+      "title": "TaskProgressPayload",
+      "type": "object"
+    },
+    "TaskStatusChangedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "task.status_changed",
+          "default": "task.status_changed",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/TaskStatusChangedPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "TaskStatusChangedEvent",
+      "type": "object"
+    },
+    "TaskStatusChangedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "task": {
+          "$ref": "#/$defs/TaskView"
+        },
+        "previous_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "queued",
+                "running",
+                "completed",
+                "failed",
+                "cancelled",
+                "interrupted"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Previous Status"
+        },
+        "previous_phase": {
+          "anyOf": [
+            {
+              "enum": [
+                "waiting_dependency",
+                "acquiring_lock",
+                "thinking",
+                "calling_tool",
+                "waiting_approval",
+                "waiting_user",
+                "retrying_rate_limit",
+                "wrapping_up",
+                "settled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Previous Phase"
+        }
+      },
+      "required": [
+        "task"
+      ],
+      "title": "TaskStatusChangedPayload",
+      "type": "object"
+    },
+    "TaskSteeredEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "task.steered",
+          "default": "task.steered",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/TaskSteeredPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "TaskSteeredEvent",
+      "type": "object"
+    },
+    "TaskSteeredPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "live_steer",
+            "queued_merge",
+            "revise_restart"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "instruction_preview": {
+          "title": "Instruction Preview",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "mode",
+        "instruction_preview"
+      ],
+      "title": "TaskSteeredPayload",
+      "type": "object"
+    },
+    "TaskView": {
+      "additionalProperties": false,
+      "description": "后台 Role Agent 任务实时看板视图。",
+      "properties": {
+        "main_conversation_id": {
+          "title": "Main Conversation Id",
+          "type": "string"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "role_name": {
+          "title": "Role Name",
+          "type": "string"
+        },
+        "role_conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Conversation Id"
+        },
+        "mandate": {
+          "title": "Mandate",
+          "type": "string"
+        },
+        "work_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Work Path"
+        },
+        "lock_mode": {
+          "default": "exclusive",
+          "enum": [
+            "exclusive",
+            "shared",
+            "none"
+          ],
+          "title": "Lock Mode",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "running",
+            "completed",
+            "failed",
+            "cancelled",
+            "interrupted"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "live_phase": {
+          "default": "settled",
+          "enum": [
+            "waiting_dependency",
+            "acquiring_lock",
+            "thinking",
+            "calling_tool",
+            "waiting_approval",
+            "waiting_user",
+            "retrying_rate_limit",
+            "wrapping_up",
+            "settled"
+          ],
+          "title": "Live Phase",
+          "type": "string"
+        },
+        "queue_position": {
+          "default": 0,
+          "title": "Queue Position",
+          "type": "integer"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "blocked_by": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Blocked By",
+          "type": "array"
+        },
+        "pending_interaction_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Pending Interaction Ids",
+          "type": "array"
+        },
+        "current_step": {
+          "default": 0,
+          "title": "Current Step",
+          "type": "integer"
+        },
+        "max_requests": {
+          "default": 35,
+          "title": "Max Requests",
+          "type": "integer"
+        },
+        "tool_calls_count": {
+          "default": 0,
+          "title": "Tool Calls Count",
+          "type": "integer"
+        },
+        "max_tool_calls": {
+          "default": 80,
+          "title": "Max Tool Calls",
+          "type": "integer"
+        },
+        "soft_limit_triggered": {
+          "default": false,
+          "title": "Soft Limit Triggered",
+          "type": "boolean"
+        },
+        "active_tool": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActiveToolView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "recent_steps": {
+          "items": {
+            "$ref": "#/$defs/ToolStepSummaryView"
+          },
+          "title": "Recent Steps",
+          "type": "array"
+        },
+        "result_summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Result Summary"
+        },
+        "usage": {
+          "$ref": "#/$defs/RunUsageView"
+        },
+        "created_at": {
+          "title": "Created At",
+          "type": "string"
+        },
+        "updated_at": {
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "main_conversation_id",
+        "task_id",
+        "role_name",
+        "mandate",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "TaskView",
+      "type": "object"
+    },
+    "ToolStepSummaryView": {
+      "additionalProperties": false,
+      "description": "最近工具执行步摘要。",
+      "properties": {
+        "tool_name": {
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "succeeded": {
+          "title": "Succeeded",
+          "type": "boolean"
+        },
+        "duration_ms": {
+          "default": 0,
+          "title": "Duration Ms",
+          "type": "integer"
+        },
+        "error_preview": {
+          "default": "",
+          "title": "Error Preview",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_name",
+        "succeeded"
+      ],
+      "title": "ToolStepSummaryView",
+      "type": "object"
+    },
+    "TreeBranchCreatedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "tree.branch_created",
+          "default": "tree.branch_created",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/TreeBranchCreatedPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "TreeBranchCreatedEvent",
+      "type": "object"
+    },
+    "TreeBranchCreatedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "branch": {
+          "$ref": "#/$defs/BranchView"
+        },
+        "reason": {
+          "enum": [
+            "user_create",
+            "user_fork",
+            "semantic_fork"
+          ],
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "branch",
+        "reason"
+      ],
+      "title": "TreeBranchCreatedPayload",
+      "type": "object"
+    },
+    "TreeBranchSwitchedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "tree.branch_switched",
+          "default": "tree.branch_switched",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/TreeBranchSwitchedPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "TreeBranchSwitchedEvent",
+      "type": "object"
+    },
+    "TreeBranchSwitchedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "previous_conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Previous Conversation Id"
+        },
+        "active_conversation_id": {
+          "title": "Active Conversation Id",
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "user_switch",
+            "semantic_switch",
+            "user_fork",
+            "user_create"
+          ],
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "active_conversation_id",
+        "reason"
+      ],
+      "title": "TreeBranchSwitchedPayload",
+      "type": "object"
+    },
+    "TreeBranchUpdatedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "tree.branch_updated",
+          "default": "tree.branch_updated",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/TreeBranchUpdatedPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "TreeBranchUpdatedEvent",
+      "type": "object"
+    },
+    "TreeBranchUpdatedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "branch": {
+          "$ref": "#/$defs/BranchView"
+        }
+      },
+      "required": [
+        "branch"
+      ],
+      "title": "TreeBranchUpdatedPayload",
+      "type": "object"
+    },
+    "TreeEntryAppendedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "tree.entry_appended",
+          "default": "tree.entry_appended",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/TreeEntryAppendedPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "TreeEntryAppendedEvent",
+      "type": "object"
+    },
+    "TreeEntryAppendedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "title": "Conversation Id",
+          "type": "string"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/EntryView"
+          },
+          "title": "Entries",
+          "type": "array"
+        },
+        "head_entry_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Head Entry Id"
+        }
+      },
+      "required": [
+        "conversation_id"
+      ],
+      "title": "TreeEntryAppendedPayload",
+      "type": "object"
+    },
+    "TreeUsageSummaryView": {
+      "additionalProperties": false,
+      "description": "Conversation Tree 全局三层汇总（Layer C）。",
+      "properties": {
+        "conversation_id": {
+          "title": "Conversation Id",
+          "type": "string"
+        },
+        "main_router_usage": {
+          "$ref": "#/$defs/RunUsageView"
+        },
+        "role_tasks_usage": {
+          "items": {
+            "$ref": "#/$defs/RoleTaskUsageItemView"
+          },
+          "title": "Role Tasks Usage",
+          "type": "array"
+        },
+        "role_tasks_total": {
+          "$ref": "#/$defs/RunUsageView"
+        },
+        "auxiliary_jev_usage": {
+          "items": {
+            "$ref": "#/$defs/AuxJevUsageView"
+          },
+          "title": "Auxiliary Jev Usage",
+          "type": "array"
+        }
+      },
+      "required": [
+        "conversation_id",
+        "main_router_usage"
+      ],
+      "title": "TreeUsageSummaryView",
+      "type": "object"
+    },
+    "UsageBudgetWarningEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "usage.budget_warning",
+          "default": "usage.budget_warning",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/UsageBudgetWarningPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "UsageBudgetWarningEvent",
+      "type": "object"
+    },
+    "UsageBudgetWarningPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "title": "Conversation Id",
+          "type": "string"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "dimension": {
+          "enum": [
+            "requests",
+            "tool_calls",
+            "tokens"
+          ],
+          "title": "Dimension",
+          "type": "string"
+        },
+        "ratio": {
+          "title": "Ratio",
+          "type": "number"
+        }
+      },
+      "required": [
+        "conversation_id",
+        "run_id",
+        "dimension",
+        "ratio"
+      ],
+      "title": "UsageBudgetWarningPayload",
+      "type": "object"
+    },
+    "UsageStepRecordedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "usage.step_recorded",
+          "default": "usage.step_recorded",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/UsageStepRecordedPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "UsageStepRecordedEvent",
+      "type": "object"
+    },
+    "UsageStepRecordedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "conversation_id": {
+          "title": "Conversation Id",
+          "type": "string"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "step_usage": {
+          "$ref": "#/$defs/RunUsageView"
+        },
+        "run_usage": {
+          "$ref": "#/$defs/RunUsageView"
+        },
+        "tree_usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TreeUsageSummaryView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "conversation_id",
+        "run_id",
+        "step_usage",
+        "run_usage"
+      ],
+      "title": "UsageStepRecordedPayload",
+      "type": "object"
+    },
+    "VerifiedCitationView": {
+      "additionalProperties": false,
+      "description": "经物理边界核验的生成结果溯源引用。",
+      "properties": {
+        "raw_tag": {
+          "title": "Raw Tag",
+          "type": "string"
+        },
+        "target_kind": {
+          "enum": [
+            "attachment",
+            "artifact"
+          ],
+          "title": "Target Kind",
+          "type": "string"
+        },
+        "target_id": {
+          "title": "Target Id",
+          "type": "string"
+        },
+        "locator": {
+          "$ref": "#/$defs/CitationLocatorView"
+        },
+        "excerpt": {
+          "title": "Excerpt",
+          "type": "string"
+        },
+        "verified": {
+          "title": "Verified",
+          "type": "boolean"
+        },
+        "verification_reason": {
+          "default": "ok",
+          "title": "Verification Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "raw_tag",
+        "target_kind",
+        "target_id",
+        "locator",
+        "excerpt",
+        "verified"
+      ],
+      "title": "VerifiedCitationView",
+      "type": "object"
+    },
+    "WorkspaceLockView": {
+      "additionalProperties": false,
+      "description": "工作区读写锁实时状态。",
+      "properties": {
+        "work_path": {
+          "title": "Work Path",
+          "type": "string"
+        },
+        "exclusive_holder": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exclusive Holder"
+        },
+        "shared_holders": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Shared Holders",
+          "type": "array"
+        },
+        "queued_tasks": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Queued Tasks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "work_path"
+      ],
+      "title": "WorkspaceLockView",
+      "type": "object"
+    },
+    "WorkspaceLocksChangedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "role_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role Name"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "channel": {
+          "default": "main",
+          "enum": [
+            "main",
+            "task_stream"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "type": {
+          "const": "workspace.locks_changed",
+          "default": "workspace.locks_changed",
+          "title": "Type",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/WorkspaceLocksChangedPayload"
+        }
+      },
+      "required": [
+        "seq",
+        "event_id",
+        "ts",
+        "payload"
+      ],
+      "title": "WorkspaceLocksChangedEvent",
+      "type": "object"
+    },
+    "WorkspaceLocksChangedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "locks": {
+          "items": {
+            "$ref": "#/$defs/WorkspaceLockView"
+          },
+          "title": "Locks",
+          "type": "array"
+        }
+      },
+      "title": "WorkspaceLocksChangedPayload",
+      "type": "object"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "artifact.updated": "#/$defs/ArtifactUpdatedEvent",
+      "attachment.registered": "#/$defs/AttachmentRegisteredEvent",
+      "context.snapshot": "#/$defs/ContextSnapshotEvent",
+      "interaction.cancelled": "#/$defs/InteractionCancelledEvent",
+      "interaction.requested": "#/$defs/InteractionRequestedEvent",
+      "interaction.resolved": "#/$defs/InteractionResolvedEvent",
+      "llm.pool_status": "#/$defs/LlmPoolStatusEvent",
+      "message.part.delta": "#/$defs/MessagePartDeltaEvent",
+      "message.part.end": "#/$defs/MessagePartEndEvent",
+      "message.part.start": "#/$defs/MessagePartStartEvent",
+      "run.completed": "#/$defs/RunCompletedEvent",
+      "run.failed": "#/$defs/RunFailedEvent",
+      "run.interrupted": "#/$defs/RunInterruptedEvent",
+      "run.started": "#/$defs/RunStartedEvent",
+      "runtime.ready": "#/$defs/RuntimeReadyEvent",
+      "runtime.recovery": "#/$defs/RuntimeRecoveryEvent",
+      "stream.resync_required": "#/$defs/StreamResyncRequiredEvent",
+      "task.created": "#/$defs/TaskCreatedEvent",
+      "task.progress": "#/$defs/TaskProgressEvent",
+      "task.status_changed": "#/$defs/TaskStatusChangedEvent",
+      "task.steered": "#/$defs/TaskSteeredEvent",
+      "tree.branch_created": "#/$defs/TreeBranchCreatedEvent",
+      "tree.branch_switched": "#/$defs/TreeBranchSwitchedEvent",
+      "tree.branch_updated": "#/$defs/TreeBranchUpdatedEvent",
+      "tree.entry_appended": "#/$defs/TreeEntryAppendedEvent",
+      "usage.budget_warning": "#/$defs/UsageBudgetWarningEvent",
+      "usage.step_recorded": "#/$defs/UsageStepRecordedEvent",
+      "workspace.locks_changed": "#/$defs/WorkspaceLocksChangedEvent"
+    },
+    "propertyName": "type"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/RuntimeReadyEvent"
+    },
+    {
+      "$ref": "#/$defs/RuntimeRecoveryEvent"
+    },
+    {
+      "$ref": "#/$defs/StreamResyncRequiredEvent"
+    },
+    {
+      "$ref": "#/$defs/RunStartedEvent"
+    },
+    {
+      "$ref": "#/$defs/MessagePartStartEvent"
+    },
+    {
+      "$ref": "#/$defs/MessagePartDeltaEvent"
+    },
+    {
+      "$ref": "#/$defs/MessagePartEndEvent"
+    },
+    {
+      "$ref": "#/$defs/RunCompletedEvent"
+    },
+    {
+      "$ref": "#/$defs/RunInterruptedEvent"
+    },
+    {
+      "$ref": "#/$defs/RunFailedEvent"
+    },
+    {
+      "$ref": "#/$defs/InteractionRequestedEvent"
+    },
+    {
+      "$ref": "#/$defs/InteractionResolvedEvent"
+    },
+    {
+      "$ref": "#/$defs/InteractionCancelledEvent"
+    },
+    {
+      "$ref": "#/$defs/TaskCreatedEvent"
+    },
+    {
+      "$ref": "#/$defs/TaskStatusChangedEvent"
+    },
+    {
+      "$ref": "#/$defs/TaskProgressEvent"
+    },
+    {
+      "$ref": "#/$defs/TaskSteeredEvent"
+    },
+    {
+      "$ref": "#/$defs/WorkspaceLocksChangedEvent"
+    },
+    {
+      "$ref": "#/$defs/TreeBranchCreatedEvent"
+    },
+    {
+      "$ref": "#/$defs/TreeBranchSwitchedEvent"
+    },
+    {
+      "$ref": "#/$defs/TreeBranchUpdatedEvent"
+    },
+    {
+      "$ref": "#/$defs/TreeEntryAppendedEvent"
+    },
+    {
+      "$ref": "#/$defs/ContextSnapshotEvent"
+    },
+    {
+      "$ref": "#/$defs/UsageStepRecordedEvent"
+    },
+    {
+      "$ref": "#/$defs/UsageBudgetWarningEvent"
+    },
+    {
+      "$ref": "#/$defs/AttachmentRegisteredEvent"
+    },
+    {
+      "$ref": "#/$defs/ArtifactUpdatedEvent"
+    },
+    {
+      "$ref": "#/$defs/LlmPoolStatusEvent"
+    }
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AgentProtocolEvent"
+}
