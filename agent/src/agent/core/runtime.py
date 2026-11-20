@@ -30,6 +30,7 @@ from agent.db import (
     ROOT_ENTRY_KEY,
     SQLModelConversationStore,
     SQLModelMcpPolicyStore,
+    SQLModelMemoryStore,
     SQLModelTicketStore,
     create_session_factory,
     create_sqlite_async_engine,
@@ -136,6 +137,7 @@ class SuperAgentRuntime:
     engine: AsyncEngine
     store: SQLModelConversationStore
     ticket_store: SQLModelTicketStore
+    memory_store: SQLModelMemoryStore
     step_store: SqliteStepStore
     context_tree: ContextTreeManager
     role_registry: RoleRegistry
@@ -216,12 +218,13 @@ async def open_runtime(
     sessions = create_session_factory(engine)
     store = SQLModelConversationStore(engine, session_factory=sessions)
     ticket_store = SQLModelTicketStore(engine, session_factory=sessions)
+    memory_store = SQLModelMemoryStore(engine, session_factory=sessions)
 
     step_target = Path(step_db_path).expanduser().resolve() if step_db_path is not None else default_step_db_path()
     step_target.parent.mkdir(parents=True, exist_ok=True)
     step_store = SqliteStepStore(database=step_target)
 
-    tree = ContextTreeManager(store, step_store=step_store)
+    tree = ContextTreeManager(store, step_store=step_store, memory_store=memory_store)
     _ = await tree.bootstrap(global_agents_path=global_agents_path)
 
     jev_client = (
@@ -293,6 +296,7 @@ async def open_runtime(
         mcp_token_root=mcp_token_root,
         elicitation_handler=elicitation_handler,
         mcp_http_client=mcp_http_client,
+        memory_store=memory_store,
     )
 
     semantic_router = (
@@ -338,6 +342,7 @@ async def open_runtime(
             engine=engine,
             store=store,
             ticket_store=ticket_store,
+            memory_store=memory_store,
             step_store=step_store,
             context_tree=tree,
             role_registry=roles,

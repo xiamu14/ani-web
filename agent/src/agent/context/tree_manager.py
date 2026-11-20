@@ -7,7 +7,12 @@ from pathlib import Path
 
 from pydantic_ai.conversation import Conversation
 from pydantic_ai.conversation_store import ConversationConflict
-from pydantic_ai.messages import ModelMessage, ModelRequest, SystemPromptPart, repair_messages
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    SystemPromptPart,
+    repair_messages,
+)
 from pydantic_ai_harness.step_persistence import StepStore
 
 from agent.context.instructions import (
@@ -16,6 +21,7 @@ from agent.context.instructions import (
     read_agents_file,
 )
 from agent.db import LAST_ACTIVE_CONV_KEY, SQLModelConversationStore
+from agent.memory import MemoryStorePort, build_l0_compaction_recovery_block
 
 GLOBAL_INSTRUCTIONS_KEY = "global_instructions_loaded"
 
@@ -48,9 +54,11 @@ class ContextTreeManager:
         store: SQLModelConversationStore,
         *,
         step_store: StepStore | None = None,
+        memory_store: MemoryStorePort | None = None,
     ) -> None:
         self._store: SQLModelConversationStore = store
         self._step_store: StepStore | None = step_store
+        self._memory_store: MemoryStorePort | None = memory_store
         self._root_entry_id: str | None = None
         self._active_conversation_id: str | None = None
 
@@ -177,9 +185,18 @@ class ContextTreeManager:
         work_path: str | Path | None = None,
         target_title: str = "",
     ) -> Conversation:
-        """在当前分支末端插入 stop_backtrack=1 交接节点，派生新主分支并切换焦点。"""
+        """在当前分支末端插入 stop_backtrack=1 交接节点，派生新主分支并切换焦点（自动附带 L0 记忆状态）。"""
         norm_path = str(normalize_workspace_path(work_path)) if work_path is not None else None
-        handoff_msg = ModelRequest(parts=[SystemPromptPart(content=f"[Handoff Context]\n{summary}")])
+        effective_path = norm_path or await self._store.get_work_path(parent_conversation_id)
+        handoff_text = f"[Handoff Context]\n{summary}"
+        if self._memory_store is not None:
+            l0_block = await build_l0_compaction_recovery_block(
+                self._memory_store,
+                work_path=effective_path,
+            )
+            if l0_block:
+                handoff_text = f"{handoff_text}\n\n{l0_block}"
+        handoff_msg = ModelRequest(parts=[SystemPromptPart(content=handoff_text)])
         record = await self._store.create_handoff_branch(
             parent_conversation_id,
             handoff_message=handoff_msg,

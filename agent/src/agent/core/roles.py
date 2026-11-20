@@ -55,6 +55,8 @@ class RoleSpec:
         *,
         step_store: StepStore | None = None,
         extra_capabilities: Sequence[AbstractCapability[object]] = (),
+        extra_toolsets: Sequence[AbstractToolset[object]] = (),
+        extra_instructions: str = "",
     ) -> Agent[object, str]:
         """按无状态蓝图构建单次运行可用的 Agent 实例。"""
         caps: list[AbstractCapability[object]] = [
@@ -67,12 +69,17 @@ class RoleSpec:
             caps.append(
                 StepPersistence(store=step_store, agent_name=self.name, capture_frontier=True)
             )
+        full_instructions = (
+            f"{self.instructions}\n\n{extra_instructions}"
+            if extra_instructions.strip()
+            else self.instructions
+        )
         return Agent(
             model=self.model,
             deps_type=object,
             name=self.name,
-            instructions=self.instructions,
-            toolsets=list(self.toolsets),
+            instructions=full_instructions,
+            toolsets=[*self.toolsets, *extra_toolsets],
             capabilities=sort_capabilities(caps),
             retries=3,
         )

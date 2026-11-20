@@ -68,6 +68,14 @@ from agent.memory.rank import (
     rank_by_strength,
     recency_head_size,
 )
+from agent.memory.runtime_adapter import (
+    RoleMemoryBundle,
+    archive_completed_role_task,
+    build_l0_compaction_recovery_block,
+    build_l0_l1_memory_block,
+    derive_project_key,
+    prepare_role_memory_bundle,
+)
 from agent.memory.toolset import build_memory_toolset
 
 __all__ = [
@@ -98,15 +106,20 @@ __all__ = [
     "ObservationType",
     "PairClassification",
     "RankableMemory",
+    "RoleMemoryBundle",
     "SaveObservationResult",
     "SessionSummaryRecord",
     "TrajectoryMemoryExtractor",
     "WorkStateEntryRecord",
     "WorkStateStatus",
+    "archive_completed_role_task",
     "blended_act_r_score",
     "build_idf_lookup",
+    "build_l0_compaction_recovery_block",
+    "build_l0_l1_memory_block",
     "build_memory_toolset",
     "classify_near_duplicate",
+    "derive_project_key",
     "exact_title_match",
     "extract_code_identifiers",
     "extract_line_anchors_from_content",
@@ -121,6 +134,7 @@ __all__ = [
     "normalize_anchor_path",
     "normalize_title",
     "pool_size",
+    "prepare_role_memory_bundle",
     "rank_by_strength",
     "recency_head_size",
     "render_l0_l1_context",
