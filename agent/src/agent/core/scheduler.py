@@ -6,10 +6,8 @@ import asyncio
 from collections import deque
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
 
 import logfire
-from fastmcp.client.elicitation import ElicitationHandler
 from opentelemetry import context as otel_context
 from pydantic_ai._http import AsyncHTTPClient
 from pydantic_ai.capabilities import AbstractCapability
@@ -27,8 +25,13 @@ from agent.core.lock_queue import (
 from agent.core.outcome_judge import ToolExecutionTrace, evaluate_task_outcome
 from agent.core.roles import RoleRegistry, RoleSessionManager, RoleSpec
 from agent.db import SQLModelTicketStore, parse_depends_on
-from agent.extensions import McpServerSpec, select_mcp_capabilities_for_role
+from agent.extensions import (
+    McpElicitationHandler,
+    McpServerSpec,
+    select_mcp_capabilities_for_role,
+)
 from agent.hooks import LoopSafetyGuardHook, PermissionGuardHook, TaskSteerHook
+from agent.llm import LlmConcurrencyController
 from agent.memory import (
     MemoryStorePort,
     archive_completed_role_task,
@@ -47,6 +50,9 @@ from agent.tools import (
 TicketEventCallback = Callable[[str, str, str], Awaitable[object]]
 
 
+_EMPTY_FROZENSET: frozenset[str] = frozenset()
+
+
 class WorkspaceLockManager:
     """按规范化 work_path（含父子目录重叠）维护读写锁、Steer/Revise 与恢复调度器。"""
 
@@ -62,12 +68,13 @@ class WorkspaceLockManager:
         tool_coordinator: ToolLockCoordinator | None = None,
         mcp_specs: Sequence[McpServerSpec] = (),
         mcp_policies: Mapping[str, McpToolPolicy] | None = None,
-        mcp_blocked_servers: frozenset[str] = frozenset(),
+        mcp_blocked_servers: frozenset[str] = _EMPTY_FROZENSET,
         mcp_prefixes: Sequence[str] = (),
         mcp_token_root: Path | None = None,
-        elicitation_handler: ElicitationHandler[Any] | None = None,
+        elicitation_handler: McpElicitationHandler | None = None,
         mcp_http_client: AsyncHTTPClient | None = None,
         memory_store: MemoryStorePort | None = None,
+        llm_controller: LlmConcurrencyController | None = None,
     ) -> None:
         self._roles: RoleRegistry = roles
         self._sessions: RoleSessionManager = sessions
@@ -81,9 +88,10 @@ class WorkspaceLockManager:
         self._mcp_blocked_servers: frozenset[str] = mcp_blocked_servers
         self._mcp_prefixes: tuple[str, ...] = tuple(mcp_prefixes)
         self._mcp_token_root: Path | None = mcp_token_root
-        self._elicitation_handler: ElicitationHandler[Any] | None = elicitation_handler
+        self._elicitation_handler: McpElicitationHandler | None = elicitation_handler
         self._mcp_http_client: AsyncHTTPClient | None = mcp_http_client
         self._memory_store: MemoryStorePort | None = memory_store
+        self._llm_controller: LlmConcurrencyController | None = llm_controller
         self._state: LockQueueState = LockQueueState()
         self._tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
         self._steer_queues: dict[tuple[str, str], deque[str]] = {}
@@ -125,40 +133,23 @@ class WorkspaceLockManager:
             self._state.mark_unfinished(main_conversation_id, task_id)
 
             if self._state.can_acquire(
-                main_conversation_id=main_conversation_id,
-                task_id=task_id,
-                norm_path=norm_path,
-                lock_mode=effective_lock,
-                depends_on=deps,
+                main_conversation_id=main_conversation_id, task_id=task_id,
+                norm_path=norm_path, lock_mode=effective_lock, depends_on=deps,
             ):
                 _ = await self._ticket_store.create_ticket(
-                    main_conversation_id=main_conversation_id,
-                    task_id=task_id,
-                    role_name=role.name,
-                    mandate=mandate,
-                    work_path=norm_path,
-                    lock_mode=effective_lock,
-                    depends_on=deps,
-                    status="running",
+                    main_conversation_id=main_conversation_id, task_id=task_id, role_name=role.name,
+                    mandate=mandate, work_path=norm_path, lock_mode=effective_lock, depends_on=deps, status="running",
                 )
                 self._state.acquire_lock(
-                    main_conversation_id=main_conversation_id,
-                    task_id=task_id,
-                    norm_path=norm_path,
-                    lock_mode=effective_lock,
+                    main_conversation_id=main_conversation_id, task_id=task_id,
+                    norm_path=norm_path, lock_mode=effective_lock,
                 )
                 self._spawn_worker(main_conversation_id, task_id)
                 return DispatchReceipt(task_id=task_id, status="running", work_path=norm_path)
 
             _ = await self._ticket_store.create_ticket(
-                main_conversation_id=main_conversation_id,
-                task_id=task_id,
-                role_name=role.name,
-                mandate=mandate,
-                work_path=norm_path,
-                lock_mode=effective_lock,
-                depends_on=deps,
-                status="queued",
+                main_conversation_id=main_conversation_id, task_id=task_id, role_name=role.name,
+                mandate=mandate, work_path=norm_path, lock_mode=effective_lock, depends_on=deps, status="queued",
             )
             pos = self._state.enqueue(
                 QueuedTask(
@@ -361,9 +352,15 @@ class WorkspaceLockManager:
                         user_intent=prompt_text, known_mcp_prefixes=self._mcp_prefixes, trace=trace,
                     )
                     extra_caps.append(perm_hook)
+                role_model = (
+                    self._llm_controller.wrap_role_model(role.model)
+                    if self._llm_controller is not None
+                    else None
+                )
                 agent = role.build_agent(
                     step_store=self._step_store, extra_capabilities=extra_caps,
                     extra_toolsets=mem_bundle.toolsets, extra_instructions=mem_bundle.extra_instructions,
+                    model_override=role_model,
                 )
                 workspace = LocalWorkspaceBackend(ticket.work_path) if ticket.work_path else None
                 async with agent:

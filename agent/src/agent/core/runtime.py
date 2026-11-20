@@ -7,10 +7,8 @@ from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import logfire
-from fastmcp.client.elicitation import ElicitationHandler
 from pydantic_ai._http import AsyncHTTPClient
 from pydantic_ai.messages import ModelMessage, ModelRequest
 from pydantic_ai_harness.step_persistence import SqliteStepStore
@@ -40,9 +38,10 @@ from agent.db import (
 from agent.extensions import (
     FastMcpProbeAdapter,
     LocalOAuthReadinessChecker,
+    McpElicitationHandler,
     load_mcp_configs,
 )
-from agent.llm import JevHttpClient
+from agent.llm import LlmConcurrencyController
 from agent.permissions import (
     JevMcpClassifier,
     McpClassifiedDecision,
@@ -143,6 +142,7 @@ class SuperAgentRuntime:
     role_registry: RoleRegistry
     permission_reviewer: PermissionReviewer
     tool_coordinator: ToolLockCoordinator
+    llm_controller: LlmConcurrencyController
     scheduler: WorkspaceLockManager
     router: SuperAgentRouter
     logfire_enabled: bool
@@ -206,8 +206,9 @@ async def open_runtime(
     mcp_token_root: Path | None = None,
     mcp_probe: McpProbePort | None = None,
     mcp_classifier: McpClassifierPort | None = None,
-    elicitation_handler: ElicitationHandler[Any] | None = None,
+    elicitation_handler: McpElicitationHandler | None = None,
     mcp_http_client: AsyncHTTPClient | None = None,
+    llm_controller: LlmConcurrencyController | None = None,
 ) -> AsyncGenerator[SuperAgentRuntime]:
     """初始化双库、ContextTreeManager、Logfire 与 SuperAgentRouter。"""
     settings = load_settings()
@@ -227,11 +228,27 @@ async def open_runtime(
     tree = ContextTreeManager(store, step_store=step_store, memory_store=memory_store)
     _ = await tree.bootstrap(global_agents_path=global_agents_path)
 
+    effective_llm_ctrl = (
+        llm_controller
+        if llm_controller is not None
+        else LlmConcurrencyController(
+            role_max_concurrency=settings.llm_max_concurrency,
+            router_max_concurrency=settings.router_max_concurrency,
+            max_queued=settings.llm_max_queued,
+            rate_limit_max_retries=settings.llm_rate_limit_max_retries,
+            base_delay_sec=settings.llm_rate_limit_base_delay_sec,
+        )
+    )
+
     jev_client = (
         JevDecisionClient(
             api_key=settings.openrouter_api_key,
             base_url=settings.openrouter_base_url,
             model=settings.decision_model_name,
+            max_concurrency=settings.jev_max_concurrency,
+            max_retries=settings.llm_rate_limit_max_retries,
+            base_delay_sec=settings.llm_rate_limit_base_delay_sec,
+            cooldown_gate=effective_llm_ctrl.cooldown_gate,
         )
         if settings.openrouter_api_key
         else None
@@ -243,8 +260,10 @@ async def open_runtime(
     )
 
     coordinator = tool_coordinator if tool_coordinator is not None else ToolLockCoordinator()
-    model = build_model(settings)
-    roles = role_registry if role_registry is not None else build_default_role_registry(model)
+    raw_model = build_model(settings)
+    role_model = effective_llm_ctrl.wrap_role_model(raw_model)
+    router_model = effective_llm_ctrl.wrap_router_model(raw_model)
+    roles = role_registry if role_registry is not None else build_default_role_registry(role_model)
 
     merged_mcp = load_mcp_configs(
         global_path=Path(global_mcp_path) if global_mcp_path is not None else None,
@@ -254,14 +273,8 @@ async def open_runtime(
     effective_classifier: McpClassifierPort
     if mcp_classifier is not None:
         effective_classifier = mcp_classifier
-    elif settings.openrouter_api_key:
-        effective_classifier = JevMcpClassifier(
-            JevHttpClient(
-                api_key=settings.openrouter_api_key,
-                base_url=settings.openrouter_base_url,
-                model=settings.decision_model_name,
-            )
-        )
+    elif jev_client is not None:
+        effective_classifier = JevMcpClassifier(jev_client)
     else:
         effective_classifier = _FailSafeMcpClassifier()
 
@@ -297,6 +310,7 @@ async def open_runtime(
         elicitation_handler=elicitation_handler,
         mcp_http_client=mcp_http_client,
         memory_store=memory_store,
+        llm_controller=effective_llm_ctrl,
     )
 
     semantic_router = (
@@ -306,7 +320,7 @@ async def open_runtime(
     )
 
     router = SuperAgentRouter(
-        model=model,
+        model=router_model,
         context_tree=tree,
         conversation_store=store,
         task_dispatcher=task_dispatcher if task_dispatcher is not None else scheduler,
@@ -348,6 +362,7 @@ async def open_runtime(
             role_registry=roles,
             permission_reviewer=reviewer,
             tool_coordinator=coordinator,
+            llm_controller=effective_llm_ctrl,
             scheduler=scheduler,
             router=router,
             logfire_enabled=logfire_enabled,
@@ -356,6 +371,8 @@ async def open_runtime(
         )
     finally:
         await scheduler.wait_all()
+        if jev_client is not None:
+            await jev_client.aclose()
         await engine.dispose()
         if logfire_enabled:
             _ = logfire.force_flush()

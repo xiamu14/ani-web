@@ -27,6 +27,12 @@ class LlmSettings(BaseSettings):
     openrouter_api_key: str | None = None
     openrouter_base_url: str = "https://openrouter.ai/api"
     decision_model_name: str = "typesafe/jev-1.14"
+    llm_max_concurrency: int = 4
+    router_max_concurrency: int = 2
+    llm_max_queued: int = 128
+    jev_max_concurrency: int = 3
+    llm_rate_limit_max_retries: int = 3
+    llm_rate_limit_base_delay_sec: float = 0.5
 
 
 def load_settings() -> LlmSettings:

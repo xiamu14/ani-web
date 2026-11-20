@@ -24,6 +24,7 @@ from agent.extensions.mcp_config import (
 )
 from agent.extensions.mcp_loader import (
     FastMcpProbeAdapter,
+    McpElicitationHandler,
     build_mcp_capability,
     build_mcp_toolset,
     select_mcp_capabilities_for_role,
@@ -59,6 +60,7 @@ __all__ = [
     "McpAuthSpec",
     "McpAuthType",
     "McpConfigIssue",
+    "McpElicitationHandler",
     "McpMergedConfig",
     "McpScope",
     "McpServerSpec",

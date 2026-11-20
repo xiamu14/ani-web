@@ -65,6 +65,7 @@ class RoleSpec:
         extra_capabilities: Sequence[AbstractCapability[object]] = (),
         extra_toolsets: Sequence[AbstractToolset[object]] = (),
         extra_instructions: str = "",
+        model_override: Model | KnownModelName | str | None = None,
     ) -> Agent[object, str]:
         """按无状态蓝图构建单次运行可用的 Agent 实例。"""
         caps: list[AbstractCapability[object]] = [
@@ -83,8 +84,9 @@ class RoleSpec:
             else self.instructions
         )
         policy = self.effective_budget_policy()
+        effective_model = model_override if model_override is not None else self.model
         return Agent(
-            model=self.model,
+            model=effective_model,
             deps_type=object,
             name=self.name,
             instructions=full_instructions,

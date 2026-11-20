@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 from fastmcp.client.elicitation import ElicitationHandler
 from fastmcp.client.transports import StdioTransport
@@ -17,16 +17,18 @@ from agent.extensions.mcp_auth import build_fastmcp_auth
 from agent.extensions.mcp_config import McpServerSpec, compute_tool_schema_hash
 from agent.permissions.mcp_ports import McpToolPolicy, ProbedMcpServer, ProbedMcpTool
 
+type McpElicitationHandler = ElicitationHandler[object, object]
+
 
 def build_mcp_toolset(
     spec: McpServerSpec,
     *,
     token_root: Path | None = None,
     encryption_key: str | bytes | None = None,
-    elicitation_handler: ElicitationHandler[Any] | None = None,
+    elicitation_handler: McpElicitationHandler | None = None,
     sampling_model: Model | None = None,
     http_client: AsyncHTTPClient | None = None,
-) -> MCPToolset[Any]:
+) -> MCPToolset[object]:
     """根据 McpServerSpec 构建配置完整的 MCPToolset（支持 stdio/http/sse 与完整 Auth）。"""
     if spec.transport == "stdio":
         if not spec.command:
@@ -68,10 +70,10 @@ def build_mcp_capability(
     *,
     token_root: Path | None = None,
     encryption_key: str | bytes | None = None,
-    elicitation_handler: ElicitationHandler[Any] | None = None,
+    elicitation_handler: McpElicitationHandler | None = None,
     sampling_model: Model | None = None,
     http_client: AsyncHTTPClient | None = None,
-) -> MCP[Any]:
+) -> MCP[object]:
     """将配置完整的 MCPToolset 包装为 `MCP(local=...)` Capability（支持 defer_loading/prefix/filter）。"""
     toolset = build_mcp_toolset(
         spec,
@@ -100,9 +102,9 @@ def select_mcp_capabilities_for_role(
     blocked_servers: frozenset[str] = frozenset(),
     token_root: Path | None = None,
     encryption_key: str | bytes | None = None,
-    elicitation_handler: ElicitationHandler[Any] | None = None,
+    elicitation_handler: McpElicitationHandler | None = None,
     http_client: AsyncHTTPClient | None = None,
-) -> list[AbstractCapability[Any]]:
+) -> list[AbstractCapability[object]]:
     """按 Role 过滤并懒装配 MCP Capabilities（显式 roles 优先，否则按 Jev recommended_roles）。"""
     if not specs:
         return []
@@ -110,7 +112,7 @@ def select_mcp_capabilities_for_role(
     for policy in (policies or {}).values():
         rec_by_server.setdefault(policy.server_name, set()).update(policy.recommended_roles)
 
-    caps: list[AbstractCapability[Any]] = []
+    caps: list[AbstractCapability[object]] = []
     for spec in specs:
         if spec.name in blocked_servers:
             continue
