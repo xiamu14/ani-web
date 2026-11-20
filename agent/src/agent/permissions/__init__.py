@@ -19,9 +19,12 @@ from agent.permissions.mcp_ports import (
     ProbedMcpTool,
 )
 from agent.permissions.reviewer import (
+    ApprovalContext,
     ApprovalDecision,
     ApprovalItem,
     AuthorizationResult,
+    ContextualUserApprovalPort,
+    ItemApprovalDecision,
     JevRiskVerdict,
     PermissionReviewer,
     UserApprovalPort,
@@ -38,10 +41,13 @@ from agent.permissions.rules import (
 __all__ = [
     "FORBIDDEN_COMMAND_RULES",
     "REVIEW_COMMAND_RULES",
+    "ApprovalContext",
     "ApprovalDecision",
     "ApprovalItem",
     "AuthorizationResult",
     "CommandRule",
+    "ContextualUserApprovalPort",
+    "ItemApprovalDecision",
     "JevMcpClassifier",
     "JevRiskVerdict",
     "McpAuthReadinessPort",

@@ -67,6 +67,12 @@ from agent.protocol.events_schema import (
     WorkspaceLocksChangedEvent,
     WorkspaceLocksChangedPayload,
 )
+from agent.protocol.interactions import (
+    InteractionAlreadyResolvedError,
+    InteractionBroker,
+    InteractionNotFoundError,
+    InteractionPayloadError,
+)
 from agent.protocol.models import (
     PROTOCOL_VERSION,
     ActiveToolView,
@@ -176,9 +182,13 @@ __all__ = [
     "EventSubscription",
     "ForkConversationRequest",
     "HealthView",
+    "InteractionAlreadyResolvedError",
+    "InteractionBroker",
     "InteractionCancelledEvent",
     "InteractionCancelledPayload",
     "InteractionKindLiteral",
+    "InteractionNotFoundError",
+    "InteractionPayloadError",
     "InteractionRequestedEvent",
     "InteractionRequestedPayload",
     "InteractionResolvedEvent",

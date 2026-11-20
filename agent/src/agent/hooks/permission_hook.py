@@ -15,7 +15,7 @@ from pydantic_ai.tools import ToolDefinition
 from agent.core.budget import LoopSafetyAbortError
 from agent.core.outcome_judge import ToolExecutionTrace
 from agent.hooks.priority import HookPriority
-from agent.permissions import PermissionReviewer
+from agent.permissions import ApprovalContext, PermissionReviewer
 
 
 def canonicalize_tool_args(args: dict[str, Any]) -> str:  # pyright: ignore[reportExplicitAny]
@@ -39,6 +39,9 @@ class PermissionGuardHook(AbstractCapability[object]):
         user_intent: str = "",
         known_mcp_prefixes: Collection[str] = (),
         trace: ToolExecutionTrace | None = None,
+        main_conversation_id: str = "",
+        task_id: str | None = None,
+        role_name: str | None = None,
     ) -> None:
         self._reviewer: PermissionReviewer = reviewer
         self._workspace_root: str | Path | None = workspace_root
@@ -47,6 +50,9 @@ class PermissionGuardHook(AbstractCapability[object]):
             p if p.endswith("_") else f"{p}_" for p in known_mcp_prefixes if p
         )
         self._trace: ToolExecutionTrace | None = trace
+        self._main_conversation_id: str = main_conversation_id
+        self._task_id: str | None = task_id
+        self._role_name: str | None = role_name
         self._seen_run_ids: set[str] = set()
         self._denied_signatures: dict[tuple[str, str], str] = {}
 
@@ -95,6 +101,13 @@ class PermissionGuardHook(AbstractCapability[object]):
             user_intent=intent,
             is_mcp_tool=is_mcp_tool,
             runtime_schema_hash=runtime_schema_hash,
+            context=ApprovalContext(
+                main_conversation_id=self._main_conversation_id,
+                task_id=self._task_id,
+                role_name=self._role_name,
+                run_id=run_id,
+                user_intent=intent,
+            ),
         )
         if not res.allowed:
             reason_msg = f"[{res.decision_source}]: {res.reason}"
