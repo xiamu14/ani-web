@@ -24,10 +24,11 @@ from agent.core.lock_queue import (
     as_lock_mode,
     format_worker_error,
 )
+from agent.core.outcome_judge import ToolExecutionTrace, evaluate_task_outcome
 from agent.core.roles import RoleRegistry, RoleSessionManager, RoleSpec
 from agent.db import SQLModelTicketStore, parse_depends_on
 from agent.extensions import McpServerSpec, select_mcp_capabilities_for_role
-from agent.hooks import PermissionGuardHook, TaskSteerHook
+from agent.hooks import LoopSafetyGuardHook, PermissionGuardHook, TaskSteerHook
 from agent.memory import (
     MemoryStorePort,
     archive_completed_role_task,
@@ -161,25 +162,16 @@ class WorkspaceLockManager:
             )
             pos = self._state.enqueue(
                 QueuedTask(
-                    main_conversation_id=main_conversation_id,
-                    task_id=task_id,
-                    norm_path=norm_path,
-                    lock_mode=effective_lock,
-                    depends_on=deps,
+                    main_conversation_id=main_conversation_id, task_id=task_id,
+                    norm_path=norm_path, lock_mode=effective_lock, depends_on=deps,
                 )
             )
-            return DispatchReceipt(
-                task_id=task_id, status="queued", queue_position=pos, work_path=norm_path
-            )
+            return DispatchReceipt(task_id=task_id, status="queued", queue_position=pos, work_path=norm_path)
 
-    async def inspect_workspace_locks(
-        self, work_path: str | None = None
-    ) -> Sequence[WorkspaceLockStatus]:
+    async def inspect_workspace_locks(self, work_path: str | None = None) -> Sequence[WorkspaceLockStatus]:
         return self._state.inspect(work_path)
 
-    async def steer_or_revise(
-        self, *, main_conversation_id: str, task_id: str, instruction: str
-    ) -> str:
+    async def steer_or_revise(self, *, main_conversation_id: str, task_id: str, instruction: str) -> str:
         """运行中实时 Steer 注入、排队中合并指令、终态/失败/中断原链 Revise 续跑。"""
         norm_id = task_id.strip().lstrip("@")
         key = (main_conversation_id, norm_id)
@@ -209,34 +201,22 @@ class WorkspaceLockManager:
             self._state.mark_unfinished(main_conversation_id, norm_id)
             self._run_prompts[key] = instruction
             if self._state.can_acquire(
-                main_conversation_id=main_conversation_id,
-                task_id=norm_id,
-                norm_path=norm_path,
-                lock_mode=effective_lock,
-                depends_on=deps,
+                main_conversation_id=main_conversation_id, task_id=norm_id,
+                norm_path=norm_path, lock_mode=effective_lock, depends_on=deps,
             ):
-                _ = await self._ticket_store.update_ticket_status(
-                    main_conversation_id, norm_id, status="running"
-                )
+                _ = await self._ticket_store.update_ticket_status(main_conversation_id, norm_id, status="running")
                 self._state.acquire_lock(
-                    main_conversation_id=main_conversation_id,
-                    task_id=norm_id,
-                    norm_path=norm_path,
-                    lock_mode=effective_lock,
+                    main_conversation_id=main_conversation_id, task_id=norm_id,
+                    norm_path=norm_path, lock_mode=effective_lock,
                 )
                 self._spawn_worker(main_conversation_id, norm_id)
                 return f"已基于原上下文链重新启动 @{norm_id}（Revise/Retry 运行中）。"
 
-            _ = await self._ticket_store.update_ticket_status(
-                main_conversation_id, norm_id, status="queued"
-            )
+            _ = await self._ticket_store.update_ticket_status(main_conversation_id, norm_id, status="queued")
             pos = self._state.enqueue(
                 QueuedTask(
-                    main_conversation_id=main_conversation_id,
-                    task_id=norm_id,
-                    norm_path=norm_path,
-                    lock_mode=effective_lock,
-                    depends_on=deps,
+                    main_conversation_id=main_conversation_id, task_id=norm_id,
+                    norm_path=norm_path, lock_mode=effective_lock, depends_on=deps,
                 )
             )
             return f"@{norm_id} 已重新加入排队队列第 {pos} 位，等待工作区锁或前置依赖完成。"
@@ -358,8 +338,12 @@ class WorkspaceLockManager:
                     self._memory_store, work_path=ticket.work_path,
                     conversation_id=role_conv.conversation_id, role_name=role.name, branch_mode="root_only",
                 )
+                policy = role.effective_budget_policy()
+                trace = ToolExecutionTrace()
+                safety_hook = LoopSafetyGuardHook(policy=policy, trace=trace)
                 extra_caps: list[AbstractCapability[object]] = [
-                    TaskSteerHook(steer_queue),
+                    safety_hook,
+                    TaskSteerHook(steer_queue, max_injections=policy.max_steer_injections),
                     ToolExecutionQueueHook(
                         workspace_root=ticket.work_path, coordinator=self._tool_coordinator,
                         mcp_policies=self._mcp_policies, known_mcp_prefixes=self._mcp_prefixes,
@@ -374,7 +358,7 @@ class WorkspaceLockManager:
                 if self._permission_reviewer is not None:
                     perm_hook = PermissionGuardHook(
                         reviewer=self._permission_reviewer, workspace_root=ticket.work_path,
-                        user_intent=prompt_text, known_mcp_prefixes=self._mcp_prefixes,
+                        user_intent=prompt_text, known_mcp_prefixes=self._mcp_prefixes, trace=trace,
                     )
                     extra_caps.append(perm_hook)
                 agent = role.build_agent(
@@ -383,19 +367,30 @@ class WorkspaceLockManager:
                 )
                 workspace = LocalWorkspaceBackend(ticket.work_path) if ticket.work_path else None
                 async with agent:
-                    result = await agent.run(prompt_text, conversation=role_conv, workspace=workspace)
+                    result = await agent.run(
+                        prompt_text, conversation=role_conv, workspace=workspace,
+                        usage_limits=policy.to_usage_limits(), timeout=policy.wall_clock_timeout_sec,
+                    )
                 await self._sessions.save_task_result(main_conversation_id, result)
-                await archive_completed_role_task(
-                    self._memory_store, work_path=ticket.work_path, conversation_id=role_conv.conversation_id,
-                    task_id=task_id, role_name=role.name, mandate=prompt_text, output=result.output,
-                    messages=result.new_messages(), discovery_tokens=result.usage.total_tokens or 0,
-                )
+                verdict = evaluate_task_outcome(result.output, trace=trace, role_name=role.name)
+                if verdict.allow_verified_memory:
+                    await archive_completed_role_task(
+                        self._memory_store, work_path=ticket.work_path, conversation_id=role_conv.conversation_id,
+                        task_id=task_id, role_name=role.name, mandate=prompt_text, output=result.output,
+                        messages=result.new_messages(), discovery_tokens=result.usage.total_tokens or 0,
+                    )
                 _ = await self._ticket_store.update_ticket_status(
-                    main_conversation_id, task_id, status="completed", run_id=result.run_id, result_summary=result.output
+                    main_conversation_id, task_id, status=verdict.status, run_id=result.run_id, result_summary=result.output
                 )
-                blocked_downstream = False
+                blocked_downstream = not verdict.succeeded
                 status_persisted = True
-                pending_event = (f"@{task_id} (@{role.name}) 已完成:\n{result.output}", "completed")
+                if verdict.succeeded:
+                    pending_event = (f"@{task_id} (@{role.name}) 已完成:\n{result.output}", "completed")
+                else:
+                    pending_event = (
+                        f"@{task_id} (@{role.name}) 未达成完成条件 [{verdict.reason_code}]（下游保持阻塞）:\n{result.output}",
+                        "failed",
+                    )
         except asyncio.CancelledError:
             _ = await self._ticket_store.update_ticket_status(main_conversation_id, task_id, status="cancelled")
             await self._ticket_store.remove_dependency(main_conversation_id, task_id)
@@ -403,7 +398,7 @@ class WorkspaceLockManager:
             status_persisted = True
             pending_event = (f"@{task_id} (@{role.name}) 已取消。", "cancelled")
             raise
-        except (AgentRunError, ModelAPIError, UsageLimitExceeded) as exc:
+        except (AgentRunError, ModelAPIError, UsageLimitExceeded, TimeoutError) as exc:
             err_msg = format_worker_error(exc)
             logfire.error(
                 "Role worker failed",
@@ -485,8 +480,17 @@ class WorkspaceLockManager:
             )
 
     async def _emit(self, main_conversation_id: str, summary: str, kind: str) -> None:
-        if self._on_event is not None:
+        if self._on_event is None:
+            return
+        try:
             _ = await self._on_event(main_conversation_id, summary, kind)
+        except (AgentRunError, ModelAPIError, UsageLimitExceeded, TimeoutError, RuntimeError, OSError) as exc:
+            logfire.error(
+                "Event callback failed (isolated from scheduler loop)",
+                main_conversation_id=main_conversation_id,
+                kind=kind,
+                error=format_worker_error(exc),
+            )
 
     async def wait_all(self) -> None:
         """等待当前所有后台 Worker 协程结算（含连续出队的排队任务）。"""

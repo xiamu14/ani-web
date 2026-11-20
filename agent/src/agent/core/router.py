@@ -15,10 +15,12 @@ from pydantic_ai import Agent, AgentRunResult
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.conversation import Conversation
 from pydantic_ai.conversation_store import ConversationConflict
+from pydantic_ai.exceptions import AgentRunError, ModelAPIError, UsageLimitExceeded
 from pydantic_ai.models import KnownModelName, Model
 from pydantic_ai_harness.step_persistence import StepPersistence, StepStore
 
 from agent.context import ContextTreeManager, SemanticBranchRouter
+from agent.core.budget import ROUTER_BUDGET_POLICY, LoopBudgetPolicy
 from agent.db import SQLModelConversationStore
 from agent.hooks import RouterContextHook, SemanticRoutingHook, sort_capabilities
 from agent.tools import (
@@ -68,11 +70,13 @@ class SuperAgentRouter:
         instructions: str = DEFAULT_ROUTER_INSTRUCTIONS,
         on_proactive_reply: ProactiveReplyHandler | None = None,
         tool_coordinator: ToolLockCoordinator | None = None,
+        budget_policy: LoopBudgetPolicy = ROUTER_BUDGET_POLICY,
     ) -> None:
         self._context_tree: ContextTreeManager = context_tree
         self._store: SQLModelConversationStore = conversation_store
         self._tasks: TaskDispatchPort | None = task_dispatcher
         self._on_proactive_reply: ProactiveReplyHandler | None = on_proactive_reply
+        self._budget_policy: LoopBudgetPolicy = budget_policy
         self._pending_events: dict[str, deque[str]] = {}
         self._running_conversations: set[str] = set()
         self._conv_locks: dict[str, asyncio.Lock] = {}
@@ -96,6 +100,7 @@ class SuperAgentRouter:
             instructions=instructions,
             toolsets=[build_router_toolset()],
             capabilities=sort_capabilities(capabilities),
+            retries=budget_policy.max_retries,
         )
 
     def _conv_lock(self, conversation_id: str) -> asyncio.Lock:
@@ -126,7 +131,13 @@ class SuperAgentRouter:
             )
             self._running_conversations.add(target_id)
             try:
-                result = await self._agent.run(prompt, conversation=latest_conv, deps=deps)
+                result = await self._agent.run(
+                    prompt,
+                    conversation=latest_conv,
+                    deps=deps,
+                    usage_limits=self._budget_policy.to_usage_limits(),
+                    timeout=self._budget_policy.wall_clock_timeout_sec,
+                )
             finally:
                 self._running_conversations.discard(target_id)
             await self._save_result(target_id, result)
@@ -177,7 +188,19 @@ class SuperAgentRouter:
                     f"后台任务有新进展，请向用户简洁播报结果：\n{report}",
                     conversation=conv,
                     deps=deps,
+                    usage_limits=self._budget_policy.to_usage_limits(),
+                    timeout=self._budget_policy.wall_clock_timeout_sec,
                 )
+        except (AgentRunError, ModelAPIError, UsageLimitExceeded, TimeoutError) as exc:
+            logfire.error(
+                "Router proactive report failed; falling back to raw ticket summary",
+                main_conversation_id=conversation_id,
+                error=str(exc),
+            )
+            fallback_output = f"[后台任务通知]\n{report}"
+            if self._on_proactive_reply is not None:
+                await self._on_proactive_reply(conversation_id, fallback_output)
+            return fallback_output
         finally:
             otel_context.detach(otel_token)
             self._running_conversations.discard(conversation_id)

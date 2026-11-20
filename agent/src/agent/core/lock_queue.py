@@ -123,7 +123,8 @@ class LockQueueState:
         effective_ahead = [
             q
             for q in queue_ahead
-            if not (
+            if not self._has_blocking_deps(q.main_conversation_id, q.depends_on)
+            and not (
                 task_id is not None
                 and q.main_conversation_id == main_conversation_id
                 and task_id in q.depends_on

@@ -14,6 +14,7 @@ class HookPriority(IntEnum):
     """能力/Hook 执行优先级（数值越小越先进入、越外层包裹）。"""
 
     PERMISSION = 0
+    LOOP_SAFETY = 5
     POLICY = 10
     TOOL_QUEUE = 20
     OBSERVABILITY = 30

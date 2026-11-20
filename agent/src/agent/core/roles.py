@@ -17,6 +17,7 @@ from pydantic_ai.toolsets import AbstractToolset
 from pydantic_ai_harness import Coder, FileSystem, Shell
 from pydantic_ai_harness.step_persistence import StepPersistence, StepStore
 
+from agent.core.budget import LoopBudgetPolicy, default_role_budget_policy
 from agent.extensions import ToolDisclosurePolicy, build_tool_search_capabilities
 from agent.hooks import sort_capabilities
 from agent.tools import LockMode
@@ -49,6 +50,13 @@ class RoleSpec:
     toolsets: Sequence[AbstractToolset[object]] = ()
     default_lock_mode: LockMode = "exclusive"
     tool_disclosure: ToolDisclosurePolicy | None = None
+    budget_policy: LoopBudgetPolicy | None = None
+
+    def effective_budget_policy(self) -> LoopBudgetPolicy:
+        """返回角色显式配置的预算策略，或按角色职责/锁模式推导的默认策略。"""
+        if self.budget_policy is not None:
+            return self.budget_policy
+        return default_role_budget_policy(self.name, default_lock_mode=self.default_lock_mode)
 
     def build_agent(
         self,
@@ -74,6 +82,7 @@ class RoleSpec:
             if extra_instructions.strip()
             else self.instructions
         )
+        policy = self.effective_budget_policy()
         return Agent(
             model=self.model,
             deps_type=object,
@@ -81,7 +90,7 @@ class RoleSpec:
             instructions=full_instructions,
             toolsets=[*self.toolsets, *extra_toolsets],
             capabilities=sort_capabilities(caps),
-            retries=3,
+            retries=policy.max_retries,
         )
 
 
