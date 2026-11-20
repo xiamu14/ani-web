@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 import logfire
 from pydantic_ai._http import AsyncHTTPClient
+from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.messages import ModelMessage, ModelRequest
 from pydantic_ai_harness.step_persistence import SqliteStepStore
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -31,6 +33,7 @@ from agent.db import (
     SQLModelConversationStore,
     SQLModelMcpPolicyStore,
     SQLModelMemoryStore,
+    SQLModelProtocolStore,
     SQLModelTicketStore,
     create_session_factory,
     create_sqlite_async_engine,
@@ -56,7 +59,15 @@ from agent.permissions import (
     ProbedMcpTool,
     UserApprovalPort,
 )
-from agent.tools import TaskDispatchPort, ToolLockCoordinator
+from agent.protocol import (
+    ContextAccountingHook,
+    ContextWindowSnapshotView,
+    InteractionBroker,
+    RecoveredBranchView,
+    RuntimeEventBus,
+    RuntimeRecoveryPayload,
+)
+from agent.tools import RouterDeps, TaskDispatchPort, ToolLockCoordinator
 
 
 class _FailSafeMcpClassifier:
@@ -150,6 +161,9 @@ class SuperAgentRuntime:
     scheduler: WorkspaceLockManager
     router: SuperAgentRouter
     logfire_enabled: bool
+    event_bus: RuntimeEventBus | None = None
+    interaction_broker: InteractionBroker | None = None
+    protocol_store: SQLModelProtocolStore | None = None
     recovery_summary: dict[str, tuple[list[str], list[str]]] = field(default_factory=dict)
     mcp_compile_report: McpCompileReport | None = None
 
@@ -215,6 +229,9 @@ async def open_runtime(
     llm_controller: LlmConcurrencyController | None = None,
     media_dir: str | Path | None = None,
     attachment_registry: AttachmentRegistry | None = None,
+    event_bus: RuntimeEventBus | None = None,
+    interaction_broker: InteractionBroker | None = None,
+    enable_protocol_services: bool = False,
 ) -> AsyncGenerator[SuperAgentRuntime]:
     """初始化双库、ContextTreeManager、Logfire 与 SuperAgentRouter。"""
     settings = load_settings()
@@ -245,6 +262,26 @@ async def open_runtime(
 
     tree = ContextTreeManager(store, step_store=step_store, memory_store=memory_store)
     _ = await tree.bootstrap(global_agents_path=global_agents_path)
+    use_protocol = enable_protocol_services or event_bus is not None or interaction_broker is not None
+    owned_bus = event_bus is None and use_protocol
+    eff_bus = event_bus if event_bus is not None else (RuntimeEventBus() if use_protocol else None)
+    eff_broker = (
+        interaction_broker
+        if interaction_broker is not None
+        else (InteractionBroker(event_bus=eff_bus, attachment_registry=effective_registry) if eff_bus is not None else None)
+    )
+    protocol_store = SQLModelProtocolStore(sessions) if use_protocol else None
+
+    async def _on_jev_usage(u: Mapping[str, object]) -> None:
+        if protocol_store is None:
+            return
+        cid = tree.active_conversation_id or "global"
+        await protocol_store.record_aux_usage(
+            conversation_id=cid, source="semantic_router",
+            input_tokens=int(cast(int, u.get("prompt_tokens", 0)) or 0),
+            output_tokens=int(cast(int, u.get("completion_tokens", 0)) or 0),
+            total_tokens=int(cast(int, u.get("total_tokens", 0)) or 0),
+        )
 
     effective_llm_ctrl = (
         llm_controller
@@ -267,14 +304,16 @@ async def open_runtime(
             max_retries=settings.llm_rate_limit_max_retries,
             base_delay_sec=settings.llm_rate_limit_base_delay_sec,
             cooldown_gate=effective_llm_ctrl.cooldown_gate,
+            on_usage=_on_jev_usage if protocol_store is not None else None,
         )
         if settings.openrouter_api_key
         else None
     )
+    eff_approval = approval_port if approval_port is not None else eff_broker
     reviewer = (
         permission_reviewer
         if permission_reviewer is not None
-        else PermissionReviewer(jev_client=jev_client, approval_port=approval_port)
+        else PermissionReviewer(jev_client=jev_client, approval_port=eff_approval)
     )
 
     coordinator = tool_coordinator if tool_coordinator is not None else ToolLockCoordinator()
@@ -312,40 +351,62 @@ async def open_runtime(
     )
     mcp_prefixes = tuple(spec.name for spec in merged_mcp.servers)
 
+    eff_elicitation = (
+        elicitation_handler
+        if elicitation_handler is not None
+        else (eff_broker.make_mcp_elicitation_handler(conversation_id=tree.active_conversation_id or "global") if eff_broker is not None else None)
+    )
+
+    async def _save_ctx_snap(snap: ContextWindowSnapshotView) -> None:
+        if protocol_store is not None:
+            await protocol_store.save_context_snapshot(
+                conversation_id=snap.conversation_id, run_id=snap.run_id, model_name=snap.model_name,
+                window_used_tokens=snap.window_used_tokens, window_limit_tokens=snap.window_limit_tokens,
+                calibrated=snap.calibrated, snapshot_json=snap.model_dump_json(),
+            )
+
+    def _role_extra_caps(main_cid: str, task_id: str, role_name: str) -> Sequence[AbstractCapability[object]]:
+        if eff_bus is None:
+            return ()
+        return (
+            ContextAccountingHook(
+                conversation_id=main_cid, task_id=task_id, role_name=role_name,
+                model_name=settings.model_name, event_bus=eff_bus,
+                known_mcp_prefixes=mcp_prefixes, on_snapshot=_save_ctx_snap,
+            ),
+        )
+
     role_sessions = RoleSessionManager(conversation_store=store, ticket_index=ticket_store)
     scheduler = WorkspaceLockManager(
-        roles=roles,
-        sessions=role_sessions,
-        ticket_store=ticket_store,
-        step_store=step_store,
-        permission_reviewer=reviewer,
-        tool_coordinator=coordinator,
-        mcp_specs=merged_mcp.servers,
-        mcp_policies=mcp_policy_index,
-        mcp_blocked_servers=mcp_blocked_servers,
-        mcp_prefixes=mcp_prefixes,
-        mcp_token_root=mcp_token_root,
-        elicitation_handler=elicitation_handler,
-        mcp_http_client=mcp_http_client,
-        memory_store=memory_store,
-        llm_controller=effective_llm_ctrl,
-        attachment_registry=effective_registry,
+        roles=roles, sessions=role_sessions, ticket_store=ticket_store, step_store=step_store,
+        permission_reviewer=reviewer, tool_coordinator=coordinator, mcp_specs=merged_mcp.servers,
+        mcp_policies=mcp_policy_index, mcp_blocked_servers=mcp_blocked_servers, mcp_prefixes=mcp_prefixes,
+        mcp_token_root=mcp_token_root, elicitation_handler=eff_elicitation, mcp_http_client=mcp_http_client,
+        memory_store=memory_store, llm_controller=effective_llm_ctrl, attachment_registry=effective_registry,
+        event_bus=eff_bus, interaction_broker=eff_broker,
+        extra_role_capabilities_factory=_role_extra_caps if eff_bus is not None else None,
     )
 
-    semantic_router = (
-        SemanticBranchRouter(jev_client=jev_client)
-        if jev_client is not None
-        else None
-    )
+    semantic_router = SemanticBranchRouter(jev_client=jev_client) if jev_client is not None else None
+    router_extra_caps: list[AbstractCapability[RouterDeps]] = []
+    if eff_bus is not None:
+        router_extra_caps.append(
+            cast(
+                AbstractCapability[RouterDeps],
+                ContextAccountingHook(
+                    conversation_id=tree.active_conversation_id or "global",
+                    model_name=settings.model_name, event_bus=eff_bus,
+                    known_mcp_prefixes=mcp_prefixes, on_snapshot=_save_ctx_snap,
+                ),
+            )
+        )
 
     router = SuperAgentRouter(
-        model=router_model,
-        context_tree=tree,
-        conversation_store=store,
+        model=router_model, context_tree=tree, conversation_store=store,
         task_dispatcher=task_dispatcher if task_dispatcher is not None else scheduler,
-        step_store=step_store,
-        semantic_router=semantic_router,
-        tool_coordinator=coordinator,
+        step_store=step_store, semantic_router=semantic_router, tool_coordinator=coordinator,
+        event_bus=eff_bus, interaction_broker=eff_broker, attachment_registry=effective_registry,
+        extra_capabilities=router_extra_caps,
     )
     recovery_summary: dict[str, tuple[list[str], list[str]]] = {}
     if task_dispatcher is None:
@@ -369,29 +430,37 @@ async def open_runtime(
                     ),
                     kind="recovery",
                 )
+    if eff_bus is not None and recovery_summary:
+        _ = eff_bus.publish(
+            "runtime.recovery",
+            RuntimeRecoveryPayload(
+                recovered_branches=[
+                    RecoveredBranchView(
+                        main_conversation_id=cid,
+                        interrupted_task_ids=intr,
+                        requeued_task_ids=req,
+                    )
+                    for cid, (intr, req) in recovery_summary.items()
+                ]
+            ),
+        )
     try:
         yield SuperAgentRuntime(
-            settings=settings,
-            engine=engine,
-            store=store,
-            ticket_store=ticket_store,
-            memory_store=memory_store,
-            step_store=step_store,
-            context_tree=tree,
-            role_registry=roles,
-            permission_reviewer=reviewer,
-            tool_coordinator=coordinator,
-            llm_controller=effective_llm_ctrl,
-            media_store=media_store,
-            attachment_registry=effective_registry,
-            scheduler=scheduler,
-            router=router,
-            logfire_enabled=logfire_enabled,
-            recovery_summary=recovery_summary,
+            settings=settings, engine=engine, store=store, ticket_store=ticket_store,
+            memory_store=memory_store, step_store=step_store, context_tree=tree,
+            role_registry=roles, permission_reviewer=reviewer, tool_coordinator=coordinator,
+            llm_controller=effective_llm_ctrl, media_store=media_store,
+            attachment_registry=effective_registry, scheduler=scheduler, router=router,
+            logfire_enabled=logfire_enabled, event_bus=eff_bus, interaction_broker=eff_broker,
+            protocol_store=protocol_store, recovery_summary=recovery_summary,
             mcp_compile_report=mcp_compile_report,
         )
     finally:
+        if eff_broker is not None:
+            _ = eff_broker.cancel_for_scope(reason="shutdown")
         await scheduler.wait_all()
+        if owned_bus and eff_bus is not None:
+            eff_bus.aclose()
         if jev_client is not None:
             await jev_client.aclose()
         await engine.dispose()

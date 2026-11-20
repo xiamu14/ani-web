@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.scripts]
-agent = "agent:main"
+agent = "agent.server.cli:main"
 
 [tool.pyright]
 venvPath = "."
