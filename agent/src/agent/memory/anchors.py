@@ -84,18 +84,17 @@ def find_line_anchor(anchor: LineAnchor, index: FileLineIndex) -> int | None:
     return None
 
 
-def verify_line_anchors(
+def verify_line_anchors_with_index(
     anchors: Sequence[LineAnchor],
     target_path: str,
-    current_content: str,
+    index: FileLineIndex,
 ) -> LineAnchorVerification | None:
-    """对照当前文件内容校验某条 Observation 在 target_path 上的全部行锚点。"""
+    """使用预构建的 FileLineIndex 校验某条 Observation 在 target_path 上的全部行锚点（避免重复切分文件）。"""
     norm_target = normalize_anchor_path(target_path)
     matching = [a for a in anchors if normalize_anchor_path(a.path) == norm_target]
     if not matching:
         return None
 
-    index = index_file_lines(current_content)
     found_lines: list[int] = []
     missing = 0
     for anchor in matching:
@@ -117,6 +116,18 @@ def verify_line_anchors(
     return LineAnchorVerification(
         state=state, lines=tuple(found_lines), missing=missing
     )
+
+
+def verify_line_anchors(
+    anchors: Sequence[LineAnchor],
+    target_path: str,
+    current_content: str,
+) -> LineAnchorVerification | None:
+    """对照当前文件内容校验某条 Observation 在 target_path 上的全部行锚点。"""
+    norm_target = normalize_anchor_path(target_path)
+    if not any(normalize_anchor_path(a.path) == norm_target for a in anchors):
+        return None
+    return verify_line_anchors_with_index(anchors, norm_target, index_file_lines(current_content))
 
 
 def format_line_anchor_suffix(verification: LineAnchorVerification | None) -> str:

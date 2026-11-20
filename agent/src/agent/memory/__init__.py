@@ -13,6 +13,7 @@ from agent.memory.anchors import (
     normalize_anchor_path,
     squash_whitespace,
     verify_line_anchors,
+    verify_line_anchors_with_index,
 )
 from agent.memory.budget import (
     DEFAULT_CONTEXT_MAX_CHARS,
@@ -77,6 +78,11 @@ from agent.memory.runtime_adapter import (
     prepare_role_memory_bundle,
 )
 from agent.memory.toolset import build_memory_toolset
+from agent.memory.workspace_io import (
+    read_workspace_text,
+    resolve_workspace_path,
+    verify_observations_on_disk,
+)
 
 __all__ = [
     "ACT_R_DECAY",
@@ -136,12 +142,16 @@ __all__ = [
     "pool_size",
     "prepare_role_memory_bundle",
     "rank_by_strength",
+    "read_workspace_text",
     "recency_head_size",
     "render_l0_l1_context",
+    "resolve_workspace_path",
     "sanitize_and_redact_text",
     "squash_whitespace",
     "tfidf_cosine",
     "tokenize_ws",
     "truncate_field_60_30_10",
     "verify_line_anchors",
+    "verify_line_anchors_with_index",
+    "verify_observations_on_disk",
 ]

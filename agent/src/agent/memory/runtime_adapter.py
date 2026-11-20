@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,16 +11,12 @@ from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.toolsets import AbstractToolset
 
-from agent.memory.anchors import verify_line_anchors
 from agent.memory.budget import render_l0_l1_context
 from agent.memory.extractor import TrajectoryMemoryExtractor
-from agent.memory.ports import (
-    LineAnchorVerification,
-    MemoryStorePort,
-    ObservationRecord,
-)
+from agent.memory.ports import MemoryStorePort
 from agent.memory.rank import pool_size
 from agent.memory.toolset import build_memory_toolset
+from agent.memory.workspace_io import verify_observations_on_disk
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -38,42 +35,6 @@ def derive_project_key(work_path: str | Path | None) -> str:
     return str(Path(work_path).expanduser().resolve())
 
 
-def _verify_anchors_on_disk(
-    observations: Sequence[ObservationRecord],
-    workspace_root: Path | None,
-) -> dict[int, LineAnchorVerification]:
-    if workspace_root is None:
-        return {}
-    file_cache: dict[str, str | None] = {}
-    verifications: dict[int, LineAnchorVerification] = {}
-    for obs in observations:
-        if not obs.line_anchors:
-            continue
-        rel_path = obs.line_anchors[0].path
-        if rel_path not in file_cache:
-            disk_file = workspace_root / rel_path
-            try:
-                file_cache[rel_path] = (
-                    disk_file.read_text(encoding="utf-8", errors="replace")
-                    if disk_file.is_file()
-                    else None
-                )
-            except OSError:
-                file_cache[rel_path] = None
-        content = file_cache[rel_path]
-        if content is None:
-            verifications[obs.id] = LineAnchorVerification(
-                state="changed",
-                lines=(),
-                missing=len(obs.line_anchors),
-            )
-        else:
-            ver = verify_line_anchors(obs.line_anchors, rel_path, content)
-            if ver is not None:
-                verifications[obs.id] = ver
-    return verifications
-
-
 async def build_l0_l1_memory_block(
     store: MemoryStorePort,
     *,
@@ -89,14 +50,16 @@ async def build_l0_l1_memory_block(
     ws_root = Path(work_path).expanduser().resolve() if work_path is not None else None
     fetch_count = pool_size(observation_limit, reinforcement_alpha)
 
-    observations = await store.list_recent_observations(
-        project_key=project_key,
-        limit=fetch_count,
-        include_superseded=False,
+    observations, summaries, work_states = await asyncio.gather(
+        store.list_recent_observations(
+            project_key=project_key,
+            limit=fetch_count,
+            include_superseded=False,
+        ),
+        store.list_recent_summaries(project_key=project_key, limit=1),
+        store.list_work_states(project_key=project_key),
     )
-    summaries = await store.list_recent_summaries(project_key=project_key, limit=1)
-    work_states = await store.list_work_states(project_key=project_key)
-    verifications = _verify_anchors_on_disk(observations, ws_root)
+    verifications = verify_observations_on_disk(observations, ws_root)
 
     return render_l0_l1_context(
         observations=observations,
@@ -115,8 +78,10 @@ async def build_l0_compaction_recovery_block(
 ) -> str:
     """在 Handoff / Compaction 后恢复 L0 状态（Open WorkState + Latest SessionSummary）。"""
     project_key = derive_project_key(work_path)
-    summaries = await store.list_recent_summaries(project_key=project_key, limit=1)
-    work_states = await store.list_work_states(project_key=project_key)
+    summaries, work_states = await asyncio.gather(
+        store.list_recent_summaries(project_key=project_key, limit=1),
+        store.list_work_states(project_key=project_key),
+    )
     return render_l0_l1_context(
         observations=(),
         summaries=summaries,

@@ -13,7 +13,6 @@ from agent.memory.anchors import (
     extract_line_anchors_from_content,
     format_line_anchor_suffix,
     normalize_anchor_path,
-    verify_line_anchors,
 )
 from agent.memory.budget import format_observation_timeline_row
 from agent.memory.ports import (
@@ -24,44 +23,17 @@ from agent.memory.ports import (
     ObservationRecord,
     ObservationType,
 )
+from agent.memory.workspace_io import read_workspace_text, verify_observations_on_disk
 
 _VALID_OBS_TYPES: frozenset[str] = frozenset(
     {"decision", "bugfix", "feature", "refactor", "discovery", "change"}
 )
 
 
-def _read_workspace_file(workspace_root: Path | None, rel_or_abs: str) -> str | None:
-    candidate = Path(rel_or_abs)
-    if not candidate.is_absolute():
-        if workspace_root is None:
-            return None
-        candidate = workspace_root / candidate
-    try:
-        if candidate.is_file():
-            return candidate.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-    return None
-
-
-def _verify_obs_against_disk(
-    obs: ObservationRecord,
-    workspace_root: Path | None,
-) -> LineAnchorVerification | None:
-    if workspace_root is None or not obs.line_anchors:
-        return None
-    first_path = obs.line_anchors[0].path
-    content = _read_workspace_file(workspace_root, first_path)
-    if content is None:
-        return LineAnchorVerification(state="changed", lines=(), missing=len(obs.line_anchors))
-    return verify_line_anchors(obs.line_anchors, first_path, content)
-
-
 def _format_full_observation_card(
     obs: ObservationRecord,
-    workspace_root: Path | None,
+    ver: LineAnchorVerification | None,
 ) -> str:
-    ver = _verify_obs_against_disk(obs, workspace_root)
     stale_banner = (
         "\n  WARNING: [STALE - CODE CHANGED] Anchored lines in this observation no longer match "
         + "current disk code. Do NOT trust literal values without calling `read_file`."
@@ -128,10 +100,11 @@ def build_memory_toolset(
         )
         if not hits:
             return f"No memory observations matched query={query!r}."
+        verifications = verify_observations_on_disk(hits, ws_path)
         rows = [
             format_observation_timeline_row(
                 obs,
-                verification=_verify_obs_against_disk(obs, ws_path),
+                verification=verifications.get(obs.id),
                 include_facts=False,
             )
             for obs in hits
@@ -157,12 +130,13 @@ def build_memory_toolset(
         )
         if not items:
             return f"Observation #{anchor_id} not found in project {project_key!r}."
+        verifications = verify_observations_on_disk(items, ws_path)
         lines: list[str] = [f"Timeline around #{anchor_id}:"]
         for obs in items:
             marker = ">>> " if obs.id == anchor_id else "    "
             row = format_observation_timeline_row(
                 obs,
-                verification=_verify_obs_against_disk(obs, ws_path),
+                verification=verifications.get(obs.id),
                 include_facts=False,
             )
             lines.append(f"{marker}{row}")
@@ -176,7 +150,10 @@ def build_memory_toolset(
         records = await store.get_observations_by_ids(project_key=project_key, ids=bounded_ids)
         if not records:
             return f"No observations found for IDs: {bounded_ids}"
-        return "\n\n".join(_format_full_observation_card(obs, ws_path) for obs in records)
+        verifications = verify_observations_on_disk(records, ws_path)
+        return "\n\n".join(
+            _format_full_observation_card(obs, verifications.get(obs.id)) for obs in records
+        )
 
     @toolset.tool_plain
     async def save_memory(
@@ -200,7 +177,7 @@ def build_memory_toolset(
             if not norm:
                 continue
             norm_files.append(norm)
-            content = _read_workspace_file(ws_path, norm)
+            content = read_workspace_text(ws_path, norm)
             if content is not None:
                 file_hashes[norm] = hashlib.sha256(content.encode("utf-8")).hexdigest()
                 anchors.extend(extract_line_anchors_from_content(norm, content))

@@ -156,6 +156,49 @@ class TestFileMemoryContextHook(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(old_fetched[0].superseded_by, active_for_file[0].id)
 
+            # 5. 验证 Step 8.2 & 8.3: FileMemoryContextHook 原生支持 get_instructions/get_toolset，
+            # 且当同会话任务结束运行 TrajectoryMemoryExtractor 时，临时机械 "Modified tariffs.py via edit_file" 自动合流被任务级观察取代
+            cap_hook = FileMemoryContextHook(
+                store=store,
+                project_key="proj",
+                workspace_root=ws,
+                conversation_id="c2",
+                role_name="coder",
+                l0_l1_instructions="=== [Memory L0/L1] ===",
+                include_l3_toolset=True,
+            )
+            self.assertEqual(cap_hook.get_instructions(), "=== [Memory L0/L1] ===")
+            self.assertIsNotNone(cap_hook.get_toolset())
+
+            extractor = TrajectoryMemoryExtractor(store)
+            task_obs, _ = await extractor.extract_and_store(
+                project_key="proj",
+                conversation_id="c2",
+                task_id="t-tariff",
+                role_name="coder",
+                mandate="Raise lithium surcharge minimum charge to 24.75",
+                output="Updated calculate_lithium_surcharge min_charge to 24.75 in tariffs.py",
+                messages=[
+                    ModelResponse(
+                        parts=[
+                            ToolCallPart(
+                                tool_name="edit_file",
+                                args={"path": "tariffs.py", "replacement": "    min_charge = 24.75"},
+                            )
+                        ]
+                    )
+                ],
+                workspace_root=ws,
+            )
+            assert task_obs is not None
+            post_task_active = await store.list_observations_for_file(
+                project_key="proj",
+                file_path="tariffs.py",
+                include_superseded=False,
+            )
+            self.assertEqual(len(post_task_active), 1)
+            self.assertEqual(post_task_active[0].id, task_obs.record.id)
+
             await engine.dispose()
 
 

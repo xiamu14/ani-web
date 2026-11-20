@@ -10,12 +10,13 @@ from pydantic_ai import RunContext
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.tools import ToolDefinition
+from pydantic_ai.toolsets import AbstractToolset
 
 from agent.hooks.priority import HookPriority
 from agent.memory.anchors import (
     extract_line_anchors_from_content,
-    normalize_anchor_path,
-    verify_line_anchors,
+    index_file_lines,
+    verify_line_anchors_with_index,
 )
 from agent.memory.budget import format_observation_timeline_row
 from agent.memory.ports import (
@@ -24,6 +25,8 @@ from agent.memory.ports import (
     MemoryStorePort,
     ObservationRecord,
 )
+from agent.memory.toolset import build_memory_toolset
+from agent.memory.workspace_io import resolve_workspace_path
 
 FILE_CONTEXT_MIN_BYTES = 1_500
 LARGE_FILE_HINT_BYTES = 32 * 1024
@@ -38,25 +41,6 @@ def _extract_path_arg(args: dict[str, Any]) -> str | None:  # pyright: ignore[re
         if isinstance(val, str) and val.strip():
             return val.strip()
     return None
-
-
-def _resolve_disk_and_rel_path(
-    raw_path: str,
-    workspace_root: Path | None,
-) -> tuple[Path, str]:
-    candidate = Path(raw_path).expanduser()
-    if not candidate.is_absolute() and workspace_root is not None:
-        disk_path = (workspace_root / candidate).resolve()
-    else:
-        disk_path = candidate.resolve()
-
-    if workspace_root is not None:
-        try:
-            rel = str(disk_path.relative_to(workspace_root.resolve()))
-            return disk_path, normalize_anchor_path(rel)
-        except ValueError:
-            pass
-    return disk_path, normalize_anchor_path(raw_path)
 
 
 def _format_l2_file_timeline(
@@ -110,6 +94,8 @@ class FileMemoryContextHook(AbstractCapability[object]):
         role_name: str = "role",
         min_file_bytes: int = FILE_CONTEXT_MIN_BYTES,
         auto_record_edits: bool = True,
+        l0_l1_instructions: str = "",
+        include_l3_toolset: bool = False,
     ) -> None:
         self._store: MemoryStorePort = store
         self._project_key: str = project_key
@@ -120,7 +106,27 @@ class FileMemoryContextHook(AbstractCapability[object]):
         self._role_name: str = role_name
         self._min_file_bytes: int = min_file_bytes
         self._auto_record_edits: bool = auto_record_edits
+        self._l0_l1_instructions: str = l0_l1_instructions
+        self._toolset: AbstractToolset[object] | None = (
+            build_memory_toolset(
+                store,
+                project_key=project_key,
+                workspace_root=self._workspace_root,
+                conversation_id=conversation_id,
+                role_name=role_name,
+            )
+            if include_l3_toolset
+            else None
+        )
         self._injected_files: set[str] = set()
+
+    @override
+    def get_instructions(self) -> str | None:
+        return self._l0_l1_instructions if self._l0_l1_instructions.strip() else None
+
+    @override
+    def get_toolset(self) -> AbstractToolset[object] | None:
+        return self._toolset
 
     @override
     async def after_tool_execute(  # pyright: ignore[reportAny]
@@ -137,7 +143,9 @@ class FileMemoryContextHook(AbstractCapability[object]):
         if raw_path is None:
             return result  # pyright: ignore[reportAny]
 
-        disk_path, rel_path = _resolve_disk_and_rel_path(raw_path, self._workspace_root)
+        rel_path, disk_path = resolve_workspace_path(raw_path, self._workspace_root)
+        if disk_path is None:
+            return result  # pyright: ignore[reportAny]
         if call.tool_name in _READ_FILE_TOOLS and isinstance(result, str):
             return await self._handle_read_file(disk_path, rel_path, result)
         if call.tool_name in _WRITE_FILE_TOOLS:
@@ -171,9 +179,10 @@ class FileMemoryContextHook(AbstractCapability[object]):
         if not history:
             return result_text
 
+        file_idx = index_file_lines(current_content)
         verifications: dict[int, LineAnchorVerification] = {}
         for obs in history:
-            ver = verify_line_anchors(obs.line_anchors, rel_path, current_content)
+            ver = verify_line_anchors_with_index(obs.line_anchors, rel_path, file_idx)
             if ver is not None:
                 verifications[obs.id] = ver
 
@@ -203,9 +212,10 @@ class FileMemoryContextHook(AbstractCapability[object]):
             limit=50,
             include_superseded=False,
         )
+        file_idx = index_file_lines(current_content)
         invalidated_ids: list[int] = []
         for obs in existing:
-            ver = verify_line_anchors(obs.line_anchors, rel_path, current_content)
+            ver = verify_line_anchors_with_index(obs.line_anchors, rel_path, file_idx)
             if ver is not None and ver.state == "changed":
                 invalidated_ids.append(obs.id)
 

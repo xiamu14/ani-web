@@ -12,8 +12,8 @@ from pydantic_ai.messages import ModelMessage, ToolCallPart
 
 from agent.memory.anchors import (
     extract_line_anchors_from_content,
-    normalize_anchor_path,
-    verify_line_anchors,
+    index_file_lines,
+    verify_line_anchors_with_index,
 )
 from agent.memory.budget import sanitize_and_redact_text, truncate_field_60_30_10
 from agent.memory.ports import (
@@ -25,6 +25,7 @@ from agent.memory.ports import (
     SaveObservationResult,
     SessionSummaryRecord,
 )
+from agent.memory.workspace_io import read_workspace_text, resolve_workspace_path
 
 _READ_TOOLS: frozenset[str] = frozenset(
     {"read_file", "file_info", "list_directory", "list_files", "search_files", "find_files", "grep"}
@@ -44,27 +45,6 @@ def _parse_call_args(call: ToolCallPart) -> dict[str, object]:
         except json.JSONDecodeError:
             return {}
     return {}
-
-
-def _resolve_rel_and_disk(
-    raw_path: str,
-    workspace_root: Path | None,
-) -> tuple[str, Path | None]:
-    candidate = Path(raw_path).expanduser()
-    if not candidate.is_absolute() and workspace_root is not None:
-        disk = (workspace_root / candidate).resolve()
-    elif candidate.is_absolute():
-        disk = candidate.resolve()
-    else:
-        return normalize_anchor_path(raw_path), None
-
-    if workspace_root is not None:
-        try:
-            rel = str(disk.relative_to(workspace_root.resolve()))
-            return normalize_anchor_path(rel), disk
-        except ValueError:
-            pass
-    return normalize_anchor_path(raw_path), disk
 
 
 def _first_meaningful_line(text: str, fallback: str) -> str:
@@ -116,7 +96,7 @@ class TrajectoryMemoryExtractor:
                     )
                     if raw_p is None:
                         continue
-                    rel_p, _ = _resolve_rel_and_disk(raw_p, ws_path)
+                    rel_p, _ = resolve_workspace_path(raw_p, ws_path)
                     if part.tool_name in _WRITE_TOOLS:
                         if rel_p not in files_modified:
                             files_modified.append(rel_p)
@@ -135,12 +115,8 @@ class TrajectoryMemoryExtractor:
         file_hashes: dict[str, str] = {}
         target_files_for_anchors = files_modified if files_modified else files_read[:2]
         for rel_p in target_files_for_anchors:
-            _, disk_p = _resolve_rel_and_disk(rel_p, ws_path)
-            if disk_p is None or not disk_p.is_file():
-                continue
-            try:
-                content = disk_p.read_text(encoding="utf-8", errors="replace")
-            except OSError:
+            content = read_workspace_text(ws_path, rel_p)
+            if content is None:
                 continue
             file_hashes[rel_p] = hashlib.sha256(content.encode("utf-8")).hexdigest()
             extracted = extract_line_anchors_from_content(
@@ -205,13 +181,10 @@ class TrajectoryMemoryExtractor:
 
         # 对所有被修改文件执行写穿失效检查：若旧观察在该文件上的行锚点已全部消失，自动标记 superseded_by
         for mod_path in files_modified:
-            _, disk_p = _resolve_rel_and_disk(mod_path, ws_path)
-            if disk_p is None or not disk_p.is_file():
+            current_content = read_workspace_text(ws_path, mod_path)
+            if current_content is None:
                 continue
-            try:
-                current_content = disk_p.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
+            file_idx = index_file_lines(current_content)
             prior_obs = await self._store.list_observations_for_file(
                 project_key=project_key,
                 file_path=mod_path,
@@ -222,8 +195,17 @@ class TrajectoryMemoryExtractor:
                 old.id
                 for old in prior_obs
                 if old.id != saved_obs.record.id
-                and (ver := verify_line_anchors(old.line_anchors, mod_path, current_content)) is not None
-                and ver.state == "changed"
+                and (
+                    (
+                        old.conversation_id == conversation_id
+                        and old.title.startswith(f"Modified {mod_path} via ")
+                    )
+                    or (
+                        (ver := verify_line_anchors_with_index(old.line_anchors, mod_path, file_idx))
+                        is not None
+                        and ver.state == "changed"
+                    )
+                )
             ]
             if stale_ids:
                 await self._store.mark_superseded(
