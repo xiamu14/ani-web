@@ -16,6 +16,7 @@ from agent.memory.ports import (
     WorkStateEntryRecord,
     WorkStateStatus,
 )
+from agent.memory.rank import rank_by_strength
 
 OBS_FIELD_MAX_CHARS = 16_000
 OBS_FIELD_HEAD_RATIO = 0.6
@@ -133,13 +134,16 @@ def render_l0_l1_context(
     observations: Sequence[ObservationRecord],
     summaries: Sequence[SessionSummaryRecord] = (),
     work_states: Sequence[WorkStateEntryRecord] = (),
+    observation_limit: int = 30,
     full_observation_count: int = 3,
+    reinforcement_alpha: float = 1.0,
+    now_epoch: int | None = None,
     max_chars: int = DEFAULT_CONTEXT_MAX_CHARS,
     anchor_verifications: Mapping[int, LineAnchorVerification] | None = None,
 ) -> str:
     """构建会话/Role 启动时的 L0 (WorkState + Latest Summary) + L1 (紧凑时间线) 记忆块。
 
-    当超出 max_chars 预算时，从最旧的 L1 观察开始整条丢弃，保证输出结构完整。
+    采用 ACT-R 激活度排序（保护最新 1/4 头部窗口），当超出 max_chars 预算时从最旧的 L1 观察开始整条丢弃。
     """
     active_obs = [o for o in observations if o.superseded_by is None]
     folded_tasks = fold_work_state_list(work_states, include_closed=False)
@@ -176,7 +180,12 @@ def render_l0_l1_context(
         if latest_summary.next_steps:
             l0_lines.append(f"- Next steps: {latest_summary.next_steps}")
 
-    newest_first = sorted(active_obs, key=lambda o: (o.created_at_epoch, o.id), reverse=True)
+    newest_first = rank_by_strength(
+        active_obs,
+        count=max(1, observation_limit),
+        alpha=reinforcement_alpha,
+        now_epoch=now_epoch,
+    )
     full_ids = {o.id for o in newest_first[: max(0, full_observation_count)]}
 
     # 从最新项开始纳入预算，再按时间升序（旧->新）渲染，方便后续增量追加

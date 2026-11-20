@@ -3,25 +3,32 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
-from typing import cast
 
-from sqlalchemy import text, update
+from sqlalchemy import or_, text, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlmodel import col, select
 
+from agent.db._memory_serde import (
+    build_fts_match_expr,
+    dump_anchors,
+    file_specificity_score,
+    merge_unique_strs,
+    now_epoch,
+    parse_str_map,
+    parse_str_tuple,
+    row_to_observation,
+    row_to_summary,
+    row_to_work_state,
+)
 from agent.db.engine import create_session_factory
 from agent.db.models import ObservationRow, SessionSummaryRow, WorkStateRow
 from agent.memory.anchors import normalize_anchor_path
 from agent.memory.budget import sanitize_and_redact_text, truncate_field_60_30_10
-from agent.memory.dedup import exact_title_match
+from agent.memory.dedup import build_idf_lookup, classify_near_duplicate, tokenize_ws
 from agent.memory.ports import (
     CreateObservationInput,
     CreateSessionSummaryInput,
-    LineAnchor,
-    MemoryProvenance,
     ObservationRecord,
     ObservationType,
     SaveObservationResult,
@@ -30,155 +37,6 @@ from agent.memory.ports import (
     WorkStateStatus,
 )
 from agent.memory.rank import iso_day_from_epoch
-
-_FTS_WORD_RE = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]+")
-
-
-def _now_epoch() -> int:
-    return int(datetime.now(UTC).timestamp())
-
-
-def _parse_str_tuple(raw_json: str) -> tuple[str, ...]:
-    try:
-        parsed: object = json.loads(raw_json)
-    except json.JSONDecodeError:
-        return ()
-    if not isinstance(parsed, list):
-        return ()
-    items = cast(list[object], parsed)
-    return tuple(str(item).strip() for item in items if str(item).strip())
-
-
-def _parse_str_map(raw_json: str) -> dict[str, str]:
-    try:
-        parsed: object = json.loads(raw_json)
-    except json.JSONDecodeError:
-        return {}
-    if not isinstance(parsed, dict):
-        return {}
-    raw_map = cast(dict[object, object], parsed)
-    return {str(k): str(v) for k, v in raw_map.items() if v is not None}
-
-
-def _parse_nullable_str_map(raw_json: str) -> dict[str, str | None]:
-    try:
-        parsed: object = json.loads(raw_json)
-    except json.JSONDecodeError:
-        return {}
-    if not isinstance(parsed, dict):
-        return {}
-    raw_map = cast(dict[object, object], parsed)
-    return {str(k): (None if v is None else str(v)) for k, v in raw_map.items()}
-
-
-def _parse_anchors(raw_json: str) -> tuple[LineAnchor, ...]:
-    try:
-        parsed: object = json.loads(raw_json)
-    except json.JSONDecodeError:
-        return ()
-    if not isinstance(parsed, list):
-        return ()
-    anchors: list[LineAnchor] = []
-    for raw_item in cast(list[object], parsed):
-        if not isinstance(raw_item, dict):
-            continue
-        item = cast(dict[str, object], raw_item)
-        path = str(item.get("path", "")).strip()
-        line_val = item.get("line")
-        text_val = str(item.get("text", ""))
-        if path and isinstance(line_val, int) and text_val:
-            anchors.append(LineAnchor(path=normalize_anchor_path(path), line=line_val, text=text_val))
-    return tuple(anchors)
-
-
-def _dump_anchors(anchors: Sequence[LineAnchor]) -> str:
-    payload = [
-        {"path": normalize_anchor_path(a.path), "line": a.line, "text": a.text}
-        for a in anchors
-    ]
-    return json.dumps(payload, ensure_ascii=False)
-
-
-def _merge_unique_strs(existing: Sequence[str], added: Sequence[str]) -> tuple[str, ...]:
-    seen: list[str] = []
-    for val in (*existing, *added):
-        cleaned = val.strip()
-        if cleaned and cleaned not in seen:
-            seen.append(cleaned)
-    return tuple(seen)
-
-
-def _row_to_observation(row: ObservationRow) -> ObservationRecord:
-    return ObservationRecord(
-        id=row.id or 0,
-        project_key=row.project_key,
-        conversation_id=row.conversation_id,
-        role_name=row.role_name,
-        type=cast(ObservationType, row.type),
-        title=row.title,
-        subtitle=row.subtitle,
-        facts=_parse_str_tuple(row.facts_json),
-        narrative=row.narrative,
-        concepts=_parse_str_tuple(row.concepts_json),
-        files_read=_parse_str_tuple(row.files_read_json),
-        files_modified=_parse_str_tuple(row.files_modified_json),
-        line_anchors=_parse_anchors(row.line_anchors_json),
-        file_hashes=_parse_str_map(row.file_hashes_json),
-        provenance=cast(MemoryProvenance, row.provenance),
-        discovery_tokens=row.discovery_tokens,
-        reinforcement_dates=_parse_str_tuple(row.reinforcement_dates_json),
-        superseded_by=row.superseded_by,
-        created_at_epoch=row.created_at_epoch,
-    )
-
-
-def _row_to_summary(row: SessionSummaryRow) -> SessionSummaryRecord:
-    return SessionSummaryRecord(
-        id=row.id or 0,
-        project_key=row.project_key,
-        conversation_id=row.conversation_id,
-        task_id=row.task_id,
-        request=row.request,
-        investigated=row.investigated,
-        learned=row.learned,
-        completed=row.completed,
-        next_steps=row.next_steps,
-        notes=row.notes,
-        files_read=_parse_str_tuple(row.files_read_json),
-        files_edited=_parse_str_tuple(row.files_edited_json),
-        discovery_tokens=row.discovery_tokens,
-        created_at_epoch=row.created_at_epoch,
-    )
-
-
-def _row_to_work_state(row: WorkStateRow) -> WorkStateEntryRecord:
-    return WorkStateEntryRecord(
-        id=row.id or 0,
-        project_key=row.project_key,
-        list_name=row.list_name,
-        task_name=row.task_name,
-        fields=_parse_nullable_str_map(row.fields_json),
-        status=cast(WorkStateStatus, row.status),
-        created_at_epoch=row.created_at_epoch,
-    )
-
-
-def _build_fts_match_expr(raw_query: str) -> str:
-    tokens = [m.group(0) for m in _FTS_WORD_RE.finditer(raw_query)]
-    if not tokens:
-        return ""
-    return " OR ".join(f'"{tok}"' for tok in tokens[:16])
-
-
-def _file_specificity_score(obs: ObservationRecord, target_norm_path: str) -> int:
-    in_modified = any(normalize_anchor_path(p) == target_norm_path for p in obs.files_modified)
-    total_files = len(obs.files_read) + len(obs.files_modified)
-    score = 2 if in_modified else 0
-    if total_files <= 3:
-        score += 2
-    elif total_files <= 8:
-        score += 1
-    return score
 
 
 class SQLModelMemoryStore:
@@ -196,11 +54,11 @@ class SQLModelMemoryStore:
         )
 
     async def save_observation(self, item: CreateObservationInput) -> SaveObservationResult:
-        """写入 Observation：自动执行 60/30/10 清洗、Tier-0 近重复强化合并并返回结果。"""
+        """写入 Observation：自动执行 60/30/10 清洗、Tier-0 强化合并及 Tier-1 同文件覆盖（Supersede）。"""
         clean_title = " ".join(sanitize_and_redact_text(item.title).split())[:120]
         if not clean_title:
             raise ValueError("Observation title must not be empty")
-        epoch = item.created_at_epoch if item.created_at_epoch is not None else _now_epoch()
+        epoch = item.created_at_epoch if item.created_at_epoch is not None else now_epoch()
         day_iso = iso_day_from_epoch(epoch)
         norm_reads = tuple(normalize_anchor_path(p) for p in item.files_read if p.strip())
         norm_mods = tuple(normalize_anchor_path(p) for p in item.files_modified if p.strip())
@@ -210,7 +68,6 @@ class SQLModelMemoryStore:
         norm_hashes = {normalize_anchor_path(k): v for k, v in item.file_hashes.items()}
 
         async with self._sessions() as session:
-            # 1. 检查同项目近期未过期记录是否存在 Tier-0 Exact Match
             recent_stmt = (
                 select(ObservationRow)
                 .where(col(ObservationRow.project_key) == item.project_key)
@@ -219,36 +76,45 @@ class SQLModelMemoryStore:
                 .limit(100)
             )
             recent_rows = (await session.execute(recent_stmt)).scalars().all()
+            idf_fn = build_idf_lookup([tokenize_ws(r.title) for r in recent_rows])
+            tier1_superseded_ids: list[int] = []
+
             for existing in recent_rows:
-                if exact_title_match(existing.title, clean_title):
-                    merged_dates = _merge_unique_strs(
-                        _parse_str_tuple(existing.reinforcement_dates_json),
+                pair = classify_near_duplicate(existing.title, clean_title, idf_fn)
+                if pair.tier == "exact":
+                    merged_dates = merge_unique_strs(
+                        parse_str_tuple(existing.reinforcement_dates_json),
                         (day_iso,),
                     )
-                    merged_facts = _merge_unique_strs(_parse_str_tuple(existing.facts_json), clean_facts)
-                    merged_concepts = _merge_unique_strs(
-                        _parse_str_tuple(existing.concepts_json),
+                    merged_facts = merge_unique_strs(parse_str_tuple(existing.facts_json), clean_facts)
+                    merged_concepts = merge_unique_strs(
+                        parse_str_tuple(existing.concepts_json),
                         tuple(item.concepts),
                     )
-                    merged_reads = _merge_unique_strs(_parse_str_tuple(existing.files_read_json), norm_reads)
-                    merged_mods = _merge_unique_strs(_parse_str_tuple(existing.files_modified_json), norm_mods)
+                    merged_reads = merge_unique_strs(parse_str_tuple(existing.files_read_json), norm_reads)
+                    merged_mods = merge_unique_strs(parse_str_tuple(existing.files_modified_json), norm_mods)
                     existing.reinforcement_dates_json = json.dumps(list(merged_dates), ensure_ascii=False)
                     existing.facts_json = json.dumps(list(merged_facts), ensure_ascii=False)
                     existing.concepts_json = json.dumps(list(merged_concepts), ensure_ascii=False)
                     existing.files_read_json = json.dumps(list(merged_reads), ensure_ascii=False)
                     existing.files_modified_json = json.dumps(list(merged_mods), ensure_ascii=False)
                     if item.line_anchors:
-                        existing.line_anchors_json = _dump_anchors(item.line_anchors)
+                        existing.line_anchors_json = dump_anchors(item.line_anchors)
                     if norm_hashes:
-                        merged_hashes = {**_parse_str_map(existing.file_hashes_json), **norm_hashes}
+                        merged_hashes = {**parse_str_map(existing.file_hashes_json), **norm_hashes}
                         existing.file_hashes_json = json.dumps(merged_hashes, ensure_ascii=False)
                     session.add(existing)
                     await session.commit()
                     await session.refresh(existing)
                     return SaveObservationResult(
-                        record=_row_to_observation(existing),
+                        record=row_to_observation(existing),
                         merged_into_existing=True,
                     )
+
+                if pair.tier == "candidate" and existing.id is not None and norm_mods:
+                    existing_mods = set(parse_str_tuple(existing.files_modified_json))
+                    if existing_mods & set(norm_mods):
+                        tier1_superseded_ids.append(existing.id)
 
             row = ObservationRow(
                 project_key=item.project_key,
@@ -262,7 +128,7 @@ class SQLModelMemoryStore:
                 concepts_json=json.dumps([c.strip() for c in item.concepts if c.strip()], ensure_ascii=False),
                 files_read_json=json.dumps(list(norm_reads), ensure_ascii=False),
                 files_modified_json=json.dumps(list(norm_mods), ensure_ascii=False),
-                line_anchors_json=_dump_anchors(item.line_anchors),
+                line_anchors_json=dump_anchors(item.line_anchors),
                 file_hashes_json=json.dumps(norm_hashes, ensure_ascii=False),
                 provenance=item.provenance,
                 discovery_tokens=max(0, item.discovery_tokens),
@@ -273,13 +139,24 @@ class SQLModelMemoryStore:
             session.add(row)
             await session.commit()
             await session.refresh(row)
+
+            if tier1_superseded_ids and row.id is not None:
+                _ = await session.execute(
+                    update(ObservationRow)
+                    .where(col(ObservationRow.project_key) == item.project_key)
+                    .where(col(ObservationRow.id).in_(tier1_superseded_ids))
+                    .values(superseded_by=row.id)
+                )
+                await session.commit()
+
             return SaveObservationResult(
-                record=_row_to_observation(row),
+                record=row_to_observation(row),
                 merged_into_existing=False,
+                superseded_ids=tuple(tier1_superseded_ids),
             )
 
     async def save_summary(self, item: CreateSessionSummaryInput) -> SessionSummaryRecord:
-        epoch = item.created_at_epoch if item.created_at_epoch is not None else _now_epoch()
+        epoch = item.created_at_epoch if item.created_at_epoch is not None else now_epoch()
         norm_reads = [normalize_anchor_path(p) for p in item.files_read if p.strip()]
         norm_edits = [normalize_anchor_path(p) for p in item.files_edited if p.strip()]
         row = SessionSummaryRow(
@@ -301,7 +178,7 @@ class SQLModelMemoryStore:
             session.add(row)
             await session.commit()
             await session.refresh(row)
-            return _row_to_summary(row)
+            return row_to_summary(row)
 
     async def append_work_state(
         self,
@@ -313,7 +190,7 @@ class SQLModelMemoryStore:
         fields: Mapping[str, str | None] | None = None,
         created_at_epoch: int | None = None,
     ) -> WorkStateEntryRecord:
-        epoch = created_at_epoch if created_at_epoch is not None else _now_epoch()
+        epoch = created_at_epoch if created_at_epoch is not None else now_epoch()
         clean_fields = {
             str(k): (None if v is None else sanitize_and_redact_text(str(v)))
             for k, v in (fields or {}).items()
@@ -330,7 +207,7 @@ class SQLModelMemoryStore:
             session.add(row)
             await session.commit()
             await session.refresh(row)
-            return _row_to_work_state(row)
+            return row_to_work_state(row)
 
     async def search_observations(
         self,
@@ -343,7 +220,7 @@ class SQLModelMemoryStore:
         include_superseded: bool = False,
         limit: int = 15,
     ) -> list[ObservationRecord]:
-        fts_expr = _build_fts_match_expr(query)
+        fts_expr = build_fts_match_expr(query)
         norm_file = normalize_anchor_path(file_path) if file_path else None
 
         async with self._sessions() as session:
@@ -361,7 +238,7 @@ class SQLModelMemoryStore:
                     LIMIT :fetch_limit
                     """
                 )
-                id_rows = (
+                id_rows: Sequence[object] = (
                     await session.execute(
                         sql,
                         {
@@ -373,12 +250,12 @@ class SQLModelMemoryStore:
                         },
                     )
                 ).scalars().all()
-                matched_ids = [int(i) for i in id_rows if i is not None]
+                matched_ids: list[int] = [i for i in id_rows if isinstance(i, int)]
                 if not matched_ids:
                     return []
                 stmt = select(ObservationRow).where(col(ObservationRow.id).in_(matched_ids))
                 row_map = {
-                    (r.id or 0): _row_to_observation(r)
+                    (r.id or 0): row_to_observation(r)
                     for r in (await session.execute(stmt)).scalars().all()
                 }
                 candidates = [row_map[i] for i in matched_ids if i in row_map]
@@ -393,7 +270,7 @@ class SQLModelMemoryStore:
                     stmt = stmt.where(col(ObservationRow.superseded_by).is_(None))
                 if type_filter is not None:
                     stmt = stmt.where(col(ObservationRow.type) == type_filter)
-                candidates = [_row_to_observation(r) for r in (await session.execute(stmt)).scalars().all()]
+                candidates = [row_to_observation(r) for r in (await session.execute(stmt)).scalars().all()]
 
         filtered: list[ObservationRecord] = []
         for obs in candidates:
@@ -414,6 +291,7 @@ class SQLModelMemoryStore:
         depth_before: int = 3,
         depth_after: int = 3,
     ) -> list[ObservationRecord]:
+        """利用 (project_key, created_at_epoch, id) 复合索引执行 O(log N) 双向局部邻域查询。"""
         async with self._sessions() as session:
             anchor_stmt = (
                 select(ObservationRow)
@@ -421,22 +299,44 @@ class SQLModelMemoryStore:
                 .where(col(ObservationRow.id) == anchor_id)
             )
             anchor = (await session.execute(anchor_stmt)).scalars().first()
-            if anchor is None:
+            if anchor is None or anchor.id is None:
                 return []
 
-            all_stmt = (
-                select(ObservationRow)
-                .where(col(ObservationRow.project_key) == project_key)
-                .order_by(col(ObservationRow.created_at_epoch).asc(), col(ObservationRow.id).asc())
-            )
-            ordered = [_row_to_observation(r) for r in (await session.execute(all_stmt)).scalars().all()]
+            before_rows: list[ObservationRow] = []
+            if depth_before > 0:
+                before_stmt = (
+                    select(ObservationRow)
+                    .where(col(ObservationRow.project_key) == project_key)
+                    .where(
+                        or_(
+                            col(ObservationRow.created_at_epoch) < anchor.created_at_epoch,
+                            (col(ObservationRow.created_at_epoch) == anchor.created_at_epoch)
+                            & (col(ObservationRow.id) < anchor.id),
+                        )
+                    )
+                    .order_by(col(ObservationRow.created_at_epoch).desc(), col(ObservationRow.id).desc())
+                    .limit(depth_before)
+                )
+                before_rows = list(reversed((await session.execute(before_stmt)).scalars().all()))
 
-        anchor_idx = next((idx for idx, item in enumerate(ordered) if item.id == anchor_id), None)
-        if anchor_idx is None:
-            return []
-        start = max(0, anchor_idx - max(0, depth_before))
-        end = min(len(ordered), anchor_idx + max(0, depth_after) + 1)
-        return ordered[start:end]
+            after_rows: list[ObservationRow] = []
+            if depth_after > 0:
+                after_stmt = (
+                    select(ObservationRow)
+                    .where(col(ObservationRow.project_key) == project_key)
+                    .where(
+                        or_(
+                            col(ObservationRow.created_at_epoch) > anchor.created_at_epoch,
+                            (col(ObservationRow.created_at_epoch) == anchor.created_at_epoch)
+                            & (col(ObservationRow.id) > anchor.id),
+                        )
+                    )
+                    .order_by(col(ObservationRow.created_at_epoch).asc(), col(ObservationRow.id).asc())
+                    .limit(depth_after)
+                )
+                after_rows = list((await session.execute(after_stmt)).scalars().all())
+
+        return [row_to_observation(r) for r in (*before_rows, anchor, *after_rows)]
 
     async def get_observations_by_ids(
         self,
@@ -453,7 +353,7 @@ class SQLModelMemoryStore:
                 .where(col(ObservationRow.id).in_(list(ids)))
             )
             rows = (await session.execute(stmt)).scalars().all()
-        by_id = {(r.id or 0): _row_to_observation(r) for r in rows}
+        by_id = {(r.id or 0): row_to_observation(r) for r in rows}
         return [by_id[i] for i in ids if i in by_id]
 
     async def list_recent_observations(
@@ -473,7 +373,7 @@ class SQLModelMemoryStore:
             if not include_superseded:
                 stmt = stmt.where(col(ObservationRow.superseded_by).is_(None))
             rows = (await session.execute(stmt)).scalars().all()
-        return [_row_to_observation(r) for r in rows]
+        return [row_to_observation(r) for r in rows]
 
     async def list_observations_for_file(
         self,
@@ -483,19 +383,42 @@ class SQLModelMemoryStore:
         limit: int = 15,
         include_superseded: bool = False,
     ) -> list[ObservationRecord]:
+        """在 SQLite 层通过 json_each 下推路径过滤，再按文件特异性评分排序。"""
         norm_target = normalize_anchor_path(file_path)
-        recent = await self.list_recent_observations(
-            project_key=project_key,
-            limit=200,
-            include_superseded=include_superseded,
+        sql = text(
+            """
+            SELECT o.id
+            FROM observations o
+            WHERE o.project_key = :project_key
+              AND (:include_superseded = 1 OR o.superseded_by IS NULL)
+              AND (
+                EXISTS (SELECT 1 FROM json_each(o.files_modified_json) WHERE value = :file_path)
+                OR EXISTS (SELECT 1 FROM json_each(o.files_read_json) WHERE value = :file_path)
+              )
+            ORDER BY o.created_at_epoch DESC, o.id DESC
+            LIMIT :fetch_limit
+            """
         )
-        matched = [
-            obs
-            for obs in recent
-            if norm_target in obs.files_modified or norm_target in obs.files_read
-        ]
+        async with self._sessions() as session:
+            id_rows: Sequence[object] = (
+                await session.execute(
+                    sql,
+                    {
+                        "project_key": project_key,
+                        "include_superseded": 1 if include_superseded else 0,
+                        "file_path": norm_target,
+                        "fetch_limit": max(limit * 4, 40),
+                    },
+                )
+            ).scalars().all()
+            matched_ids = [i for i in id_rows if isinstance(i, int)]
+            if not matched_ids:
+                return []
+            stmt = select(ObservationRow).where(col(ObservationRow.id).in_(matched_ids))
+            matched = [row_to_observation(r) for r in (await session.execute(stmt)).scalars().all()]
+
         matched.sort(
-            key=lambda obs: (_file_specificity_score(obs, norm_target), obs.created_at_epoch, obs.id),
+            key=lambda obs: (file_specificity_score(obs, norm_target), obs.created_at_epoch, obs.id),
             reverse=True,
         )
         return matched[:limit]
@@ -514,7 +437,7 @@ class SQLModelMemoryStore:
                 .limit(limit)
             )
             rows = (await session.execute(stmt)).scalars().all()
-        return [_row_to_summary(r) for r in rows]
+        return [row_to_summary(r) for r in rows]
 
     async def list_work_states(
         self,
@@ -528,7 +451,7 @@ class SQLModelMemoryStore:
                 .order_by(col(WorkStateRow.created_at_epoch).asc(), col(WorkStateRow.id).asc())
             )
             rows = (await session.execute(stmt)).scalars().all()
-        return [_row_to_work_state(r) for r in rows]
+        return [row_to_work_state(r) for r in rows]
 
     async def mark_superseded(
         self,

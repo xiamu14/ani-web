@@ -37,8 +37,17 @@ _PATH_EXCLUSIVE_TOOLS: frozenset[str] = frozenset(
 _SHELL_EXCLUSIVE_TOOLS: frozenset[str] = frozenset({"shell", "run_command", "start_command"})
 _CMD_HANDLE_TOOLS: frozenset[str] = frozenset({"check_command", "stop_command"})
 _NO_LOCK_TOOLS: frozenset[str] = frozenset(
-    {"list_tasks", "inspect_workspace_locks", "load_capability", "search_tools"}
+    {
+        "list_tasks",
+        "inspect_workspace_locks",
+        "load_capability",
+        "search_tools",
+        "memory_search",
+        "memory_timeline",
+        "get_observations",
+    }
 )
+_MEMORY_WRITE_TOOLS: frozenset[str] = frozenset({"save_memory"})
 _NO_LOCK_TOOL_KINDS: frozenset[str] = frozenset({"capability-load", "tool-search"})
 _CONV_EXCLUSIVE_TOOLS: frozenset[str] = frozenset({"set_workspace", "dispatch_role_agent"})
 _TICKET_EXCLUSIVE_TOOLS: frozenset[str] = frozenset({"steer_or_revise_task", "cancel_task"})
@@ -98,6 +107,8 @@ def resolve_tool_resource(
     """对照工具清单表解析资源键与读写锁模式。"""
     if tool_kind in _NO_LOCK_TOOL_KINDS or tool_name in _NO_LOCK_TOOLS:
         return ToolResource(kind="none", key="", lock_mode="none")
+    if tool_name in _MEMORY_WRITE_TOOLS:
+        return ToolResource(kind="exact", key="memory:save", lock_mode="exclusive")
 
     if mcp_policy is not None:
         drifted = runtime_schema_hash is not None and runtime_schema_hash != mcp_policy.schema_hash

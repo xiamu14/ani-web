@@ -36,6 +36,7 @@ from agent.memory.dedup import (
     tfidf_cosine,
     tokenize_ws,
 )
+from agent.memory.extractor import TrajectoryMemoryExtractor
 from agent.memory.ports import (
     CreateObservationInput,
     CreateSessionSummaryInput,
@@ -67,6 +68,7 @@ from agent.memory.rank import (
     rank_by_strength,
     recency_head_size,
 )
+from agent.memory.toolset import build_memory_toolset
 
 __all__ = [
     "ACT_R_DECAY",
@@ -98,10 +100,12 @@ __all__ = [
     "RankableMemory",
     "SaveObservationResult",
     "SessionSummaryRecord",
+    "TrajectoryMemoryExtractor",
     "WorkStateEntryRecord",
     "WorkStateStatus",
     "blended_act_r_score",
     "build_idf_lookup",
+    "build_memory_toolset",
     "classify_near_duplicate",
     "exact_title_match",
     "extract_code_identifiers",
