@@ -4,21 +4,31 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from pathlib import Path
+from typing import Any
 
 import logfire
+from fastmcp.client.elicitation import ElicitationHandler
 from opentelemetry import context as otel_context
+from pydantic_ai._http import AsyncHTTPClient
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.conversation_store import ConversationStore
 from pydantic_ai.exceptions import AgentRunError, ModelAPIError, UsageLimitExceeded
 from pydantic_ai.workspaces import LocalWorkspaceBackend
 from pydantic_ai_harness.step_persistence import StepStore
 
-from agent.core.lock_queue import LockQueueState, QueuedTask, as_lock_mode, format_worker_error
+from agent.core.lock_queue import (
+    LockQueueState,
+    QueuedTask,
+    as_lock_mode,
+    format_worker_error,
+)
 from agent.core.roles import RoleRegistry, RoleSessionManager, RoleSpec
 from agent.db import SQLModelTicketStore, parse_depends_on
+from agent.extensions import McpServerSpec, select_mcp_capabilities_for_role
 from agent.hooks import PermissionGuardHook, TaskSteerHook
-from agent.permissions import PermissionReviewer
+from agent.permissions import McpToolPolicy, PermissionReviewer
 from agent.tools import (
     DispatchReceipt,
     LockMode,
@@ -44,6 +54,13 @@ class WorkspaceLockManager:
         on_event: TicketEventCallback | None = None,
         permission_reviewer: PermissionReviewer | None = None,
         tool_coordinator: ToolLockCoordinator | None = None,
+        mcp_specs: Sequence[McpServerSpec] = (),
+        mcp_policies: Mapping[str, McpToolPolicy] | None = None,
+        mcp_blocked_servers: frozenset[str] = frozenset(),
+        mcp_prefixes: Sequence[str] = (),
+        mcp_token_root: Path | None = None,
+        elicitation_handler: ElicitationHandler[Any] | None = None,
+        mcp_http_client: AsyncHTTPClient | None = None,
     ) -> None:
         self._roles: RoleRegistry = roles
         self._sessions: RoleSessionManager = sessions
@@ -54,6 +71,13 @@ class WorkspaceLockManager:
         self._tool_coordinator: ToolLockCoordinator = (
             tool_coordinator if tool_coordinator is not None else ToolLockCoordinator()
         )
+        self._mcp_specs: tuple[McpServerSpec, ...] = tuple(mcp_specs)
+        self._mcp_policies: dict[str, McpToolPolicy] = dict(mcp_policies or {})
+        self._mcp_blocked_servers: frozenset[str] = mcp_blocked_servers
+        self._mcp_prefixes: tuple[str, ...] = tuple(mcp_prefixes)
+        self._mcp_token_root: Path | None = mcp_token_root
+        self._elicitation_handler: ElicitationHandler[Any] | None = elicitation_handler
+        self._mcp_http_client: AsyncHTTPClient | None = mcp_http_client
         self._state: LockQueueState = LockQueueState()
         self._tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
         self._steer_queues: dict[tuple[str, str], deque[str]] = {}
@@ -358,13 +382,27 @@ class WorkspaceLockManager:
                     ToolExecutionQueueHook(
                         workspace_root=ticket.work_path,
                         coordinator=self._tool_coordinator,
+                        mcp_policies=self._mcp_policies,
+                        known_mcp_prefixes=self._mcp_prefixes,
                     ),
                 ]
+                extra_caps.extend(
+                    select_mcp_capabilities_for_role(
+                        role.name,
+                        self._mcp_specs,
+                        policies=self._mcp_policies,
+                        blocked_servers=self._mcp_blocked_servers,
+                        token_root=self._mcp_token_root,
+                        elicitation_handler=self._elicitation_handler,
+                        http_client=self._mcp_http_client,
+                    )
+                )
                 if self._permission_reviewer is not None:
                     perm_hook = PermissionGuardHook(
                         reviewer=self._permission_reviewer,
                         workspace_root=ticket.work_path,
                         user_intent=prompt_text,
+                        known_mcp_prefixes=self._mcp_prefixes,
                     )
                     extra_caps.append(perm_hook)
                 agent = role.build_agent(
@@ -372,7 +410,8 @@ class WorkspaceLockManager:
                     extra_capabilities=extra_caps,
                 )
                 workspace = LocalWorkspaceBackend(ticket.work_path) if ticket.work_path else None
-                result = await agent.run(prompt_text, conversation=role_conv, workspace=workspace)
+                async with agent:
+                    result = await agent.run(prompt_text, conversation=role_conv, workspace=workspace)
                 await self._sessions.save_task_result(main_conversation_id, result)
                 _ = await self._ticket_store.update_ticket_status(
                     main_conversation_id,

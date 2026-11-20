@@ -7,9 +7,28 @@ import shlex
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 RuleLevel = Literal["pass", "review", "forbid"]
+
+
+class McpRuleInfo(Protocol):
+    """MCP 预编译规则只读视图（解耦具体存储与编译实现）。"""
+
+    @property
+    def server_name(self) -> str: ...
+
+    @property
+    def tool_name(self) -> str: ...
+
+    @property
+    def schema_hash(self) -> str: ...
+
+    @property
+    def level(self) -> RuleLevel: ...
+
+    @property
+    def reason(self) -> str: ...
 
 _READ_TOOLS: frozenset[str] = frozenset(
     {
@@ -202,8 +221,35 @@ def evaluate_tool_rule(
     tool_name: str,
     args: Mapping[str, object],
     workspace_root: str | Path | None = None,
+    *,
+    mcp_policy: McpRuleInfo | None = None,
+    is_mcp_tool: bool = False,
+    runtime_schema_hash: str | None = None,
 ) -> RuleVerdict:
     """纯函数规则判定: 按单一固定 Mode 返回 pass / review / forbid。"""
+    # 0. MCP 工具 O(1) 预编译查表（未登记或 Schema 漂移一律兜底 REVIEW）
+    if is_mcp_tool or mcp_policy is not None:
+        if mcp_policy is None:
+            return RuleVerdict(
+                level="review",
+                rule_id="review.mcp.unregistered",
+                category="mcp_unregistered",
+                reason=f"未登记的 MCP 工具需审核确认: {tool_name}",
+            )
+        if runtime_schema_hash is not None and runtime_schema_hash != mcp_policy.schema_hash:
+            return RuleVerdict(
+                level="review",
+                rule_id="review.mcp.schema_drift",
+                category="mcp_schema_drift",
+                reason=f"MCP 工具 Schema 发生漂移，需审核确认: {tool_name}",
+            )
+        return RuleVerdict(
+            level=mcp_policy.level,
+            rule_id=f"{mcp_policy.level}.mcp.{mcp_policy.server_name}.{mcp_policy.tool_name}",
+            category=f"mcp:{mcp_policy.server_name}",
+            reason=mcp_policy.reason or f"MCP 预编译策略: {mcp_policy.level}",
+        )
+
     norm_ws = Path(workspace_root).expanduser().resolve() if workspace_root is not None else None
     raw_path = _extract_str_arg(args, _PATH_ARG_KEYS)
     raw_cmd = _extract_str_arg(args, _CMD_ARG_KEYS)

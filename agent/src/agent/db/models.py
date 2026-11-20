@@ -79,3 +79,22 @@ class AppStateRow(SQLModel, table=True):
     key: str = Field(primary_key=True)
     value: str
     updated_at: str
+
+
+class McpToolPolicyRow(SQLModel, table=True):
+    """MCP 工具增量预编译权限与队列策略表（mcp_tool_policies）ORM 模型。"""
+
+    __tablename__: ClassVar[str] = "mcp_tool_policies"  # pyright: ignore[reportIncompatibleVariableOverride]
+
+    server_name: str = Field(primary_key=True)
+    tool_name: str = Field(primary_key=True)
+    endpoint_fingerprint: str
+    server_impl_name: str
+    server_version: str
+    prefixed_tool_name: str = Field(index=True)
+    schema_hash: str
+    level: str
+    lock_mode: str
+    recommended_roles_json: str = Field(default="[]")
+    reason: str = Field(default="")
+    updated_at: str

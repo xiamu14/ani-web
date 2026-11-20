@@ -98,6 +98,25 @@ CREATE TABLE IF NOT EXISTS app_state (
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS mcp_tool_policies (
+    server_name TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    endpoint_fingerprint TEXT NOT NULL,
+    server_impl_name TEXT NOT NULL,
+    server_version TEXT NOT NULL,
+    prefixed_tool_name TEXT NOT NULL,
+    schema_hash TEXT NOT NULL,
+    level TEXT NOT NULL CHECK (level IN ('pass', 'review', 'forbid')),
+    lock_mode TEXT NOT NULL CHECK (lock_mode IN ('shared', 'exclusive', 'none')),
+    recommended_roles_json TEXT NOT NULL DEFAULT '[]',
+    reason TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (server_name, tool_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_tool_policies_prefixed
+    ON mcp_tool_policies(prefixed_tool_name);
 """
 
 

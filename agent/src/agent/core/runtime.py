@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import logfire
+from fastmcp.client.elicitation import ElicitationHandler
+from pydantic_ai._http import AsyncHTTPClient
 from pydantic_ai.messages import ModelMessage, ModelRequest
 from pydantic_ai_harness.step_persistence import SqliteStepStore
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -16,20 +19,61 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from agent.config import LlmSettings, load_settings
 from agent.context import ContextTreeManager, JevDecisionClient, SemanticBranchRouter
 from agent.core.model import build_model
-from agent.core.roles import RoleRegistry, RoleSessionManager, build_default_role_registry
+from agent.core.roles import (
+    RoleRegistry,
+    RoleSessionManager,
+    build_default_role_registry,
+)
 from agent.core.router import RouterReply, SuperAgentRouter
 from agent.core.scheduler import WorkspaceLockManager
 from agent.db import (
     ROOT_ENTRY_KEY,
     SQLModelConversationStore,
+    SQLModelMcpPolicyStore,
     SQLModelTicketStore,
     create_session_factory,
     create_sqlite_async_engine,
     default_db_path,
     init_async_db,
 )
-from agent.permissions import PermissionReviewer, UserApprovalPort
+from agent.extensions import (
+    FastMcpProbeAdapter,
+    LocalOAuthReadinessChecker,
+    load_mcp_configs,
+)
+from agent.llm import JevHttpClient
+from agent.permissions import (
+    JevMcpClassifier,
+    McpClassifiedDecision,
+    McpClassifierPort,
+    McpCompileReport,
+    McpPolicyCompiler,
+    McpProbePort,
+    PermissionReviewer,
+    ProbedMcpServer,
+    ProbedMcpTool,
+    UserApprovalPort,
+)
 from agent.tools import TaskDispatchPort, ToolLockCoordinator
+
+
+class _FailSafeMcpClassifier:
+    async def classify(
+        self,
+        server: ProbedMcpServer,
+        tools: Sequence[ProbedMcpTool],
+    ) -> Sequence[McpClassifiedDecision]:
+        _ = server
+        return [
+            McpClassifiedDecision(
+                tool_name=t.name,
+                level="review",
+                lock_mode="exclusive",
+                recommended_roles=("coder",),
+                reason="No Jev client configured; fail-safe review+exclusive",
+            )
+            for t in tools
+        ]
 
 _observability_state: set[str] = set()
 
@@ -101,6 +145,7 @@ class SuperAgentRuntime:
     router: SuperAgentRouter
     logfire_enabled: bool
     recovery_summary: dict[str, tuple[list[str], list[str]]] = field(default_factory=dict)
+    mcp_compile_report: McpCompileReport | None = None
 
     async def inspect_context(self, conversation_id: str) -> ContextSnapshot:
         """读取真实持久化记录与当前 Context Window 内容。"""
@@ -154,6 +199,13 @@ async def open_runtime(
     approval_port: UserApprovalPort | None = None,
     permission_reviewer: PermissionReviewer | None = None,
     tool_coordinator: ToolLockCoordinator | None = None,
+    global_mcp_path: str | Path | None = None,
+    mcp_workspace_root: str | Path | None = None,
+    mcp_token_root: Path | None = None,
+    mcp_probe: McpProbePort | None = None,
+    mcp_classifier: McpClassifierPort | None = None,
+    elicitation_handler: ElicitationHandler[Any] | None = None,
+    mcp_http_client: AsyncHTTPClient | None = None,
 ) -> AsyncGenerator[SuperAgentRuntime]:
     """初始化双库、ContextTreeManager、Logfire 与 SuperAgentRouter。"""
     settings = load_settings()
@@ -190,6 +242,42 @@ async def open_runtime(
     coordinator = tool_coordinator if tool_coordinator is not None else ToolLockCoordinator()
     model = build_model(settings)
     roles = role_registry if role_registry is not None else build_default_role_registry(model)
+
+    merged_mcp = load_mcp_configs(
+        global_path=Path(global_mcp_path) if global_mcp_path is not None else None,
+        workspace_root=Path(mcp_workspace_root) if mcp_workspace_root is not None else None,
+    )
+    mcp_store = SQLModelMcpPolicyStore(engine, session_factory=sessions)
+    effective_classifier: McpClassifierPort
+    if mcp_classifier is not None:
+        effective_classifier = mcp_classifier
+    elif settings.openrouter_api_key:
+        effective_classifier = JevMcpClassifier(
+            JevHttpClient(
+                api_key=settings.openrouter_api_key,
+                base_url=settings.openrouter_base_url,
+                model=settings.decision_model_name,
+            )
+        )
+    else:
+        effective_classifier = _FailSafeMcpClassifier()
+
+    mcp_compiler = McpPolicyCompiler(
+        probe=mcp_probe if mcp_probe is not None else FastMcpProbeAdapter(token_root=mcp_token_root),
+        classifier=effective_classifier,
+        store=mcp_store,
+        auth_readiness=LocalOAuthReadinessChecker(token_root=mcp_token_root),
+    )
+    mcp_compile_report = await mcp_compiler.compile_all(merged_mcp.servers)
+    mcp_policy_index = {p.prefixed_tool_name: p for p in mcp_compile_report.policies}
+    reviewer.set_mcp_policies(mcp_policy_index)
+    mcp_blocked_servers = frozenset(
+        entry.server_name
+        for entry in mcp_compile_report.entries
+        if entry.status in ("auth_required", "error")
+    )
+    mcp_prefixes = tuple(spec.name for spec in merged_mcp.servers)
+
     role_sessions = RoleSessionManager(conversation_store=store, ticket_index=ticket_store)
     scheduler = WorkspaceLockManager(
         roles=roles,
@@ -198,6 +286,13 @@ async def open_runtime(
         step_store=step_store,
         permission_reviewer=reviewer,
         tool_coordinator=coordinator,
+        mcp_specs=merged_mcp.servers,
+        mcp_policies=mcp_policy_index,
+        mcp_blocked_servers=mcp_blocked_servers,
+        mcp_prefixes=mcp_prefixes,
+        mcp_token_root=mcp_token_root,
+        elicitation_handler=elicitation_handler,
+        mcp_http_client=mcp_http_client,
     )
 
     semantic_router = (
@@ -252,6 +347,7 @@ async def open_runtime(
             router=router,
             logfire_enabled=logfire_enabled,
             recovery_summary=recovery_summary,
+            mcp_compile_report=mcp_compile_report,
         )
     finally:
         await scheduler.wait_all()

@@ -1,0 +1,11 @@
+{
+  "servers": {
+    "knowra": {
+      "type": "http",
+      "url": "https://mcp.knowra.app/mcp",
+      "auth": {
+        "type": "oauth"
+      }
+    }
+  }
+}

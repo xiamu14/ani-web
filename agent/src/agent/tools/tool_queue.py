@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, Mapping
+from collections.abc import AsyncGenerator, Collection, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, override
+from typing import Any, Literal, Protocol, override
 
 from pydantic_ai import RunContext
 from pydantic_ai.capabilities import AbstractCapability, WrapToolExecuteHandler
@@ -54,6 +54,19 @@ class ToolResource:
     lock_mode: LockMode
 
 
+class McpLockInfo(Protocol):
+    """MCP 工具队列锁只读视图（解耦权限与存储实现）。"""
+
+    @property
+    def endpoint_fingerprint(self) -> str: ...
+
+    @property
+    def lock_mode(self) -> LockMode: ...
+
+    @property
+    def schema_hash(self) -> str: ...
+
+
 def _extract_str(args: Mapping[str, object], keys: tuple[str, ...]) -> str | None:
     for key in keys:
         val = args.get(key)
@@ -78,10 +91,27 @@ def resolve_tool_resource(
     workspace_root: str | Path | None = None,
     main_conversation_id: str | None = None,
     tool_kind: str | None = None,
+    mcp_policy: McpLockInfo | None = None,
+    is_mcp_tool: bool = False,
+    runtime_schema_hash: str | None = None,
 ) -> ToolResource:
     """对照工具清单表解析资源键与读写锁模式。"""
     if tool_kind in _NO_LOCK_TOOL_KINDS or tool_name in _NO_LOCK_TOOLS:
         return ToolResource(kind="none", key="", lock_mode="none")
+
+    if mcp_policy is not None:
+        drifted = runtime_schema_hash is not None and runtime_schema_hash != mcp_policy.schema_hash
+        return ToolResource(
+            kind="exact",
+            key=f"mcp_server:{mcp_policy.endpoint_fingerprint}",
+            lock_mode="exclusive" if drifted else mcp_policy.lock_mode,
+        )
+    if is_mcp_tool:
+        return ToolResource(
+            kind="exact",
+            key=f"mcp_unregistered:{tool_name}",
+            lock_mode="exclusive",
+        )
 
     norm_ws = Path(workspace_root).expanduser().resolve() if workspace_root is not None else None
     conv_id = main_conversation_id or "default"
@@ -178,10 +208,16 @@ class ToolExecutionQueueHook(AbstractCapability[object]):
         *,
         workspace_root: str | Path | None = None,
         coordinator: ToolLockCoordinator | None = None,
+        mcp_policies: Mapping[str, McpLockInfo] | None = None,
+        known_mcp_prefixes: Collection[str] = (),
     ) -> None:
         self._workspace_root: str | Path | None = workspace_root
         self._coordinator: ToolLockCoordinator = (
             coordinator if coordinator is not None else ToolLockCoordinator()
+        )
+        self._mcp_policies: dict[str, McpLockInfo] = dict(mcp_policies or {})
+        self._known_mcp_prefixes: tuple[str, ...] = tuple(
+            p if p.endswith("_") else f"{p}_" for p in known_mcp_prefixes if p
         )
 
     @override
@@ -195,12 +231,21 @@ class ToolExecutionQueueHook(AbstractCapability[object]):
         handler: WrapToolExecuteHandler,
     ) -> Any:  # pyright: ignore[reportExplicitAny]
         main_conv_id = getattr(ctx.deps, "main_conversation_id", None)
+        meta = tool_def.metadata if isinstance(tool_def.metadata, dict) else {}
+        is_mcp_tool = bool(meta.get("is_mcp_tool")) or any(
+            call.tool_name.startswith(prefix) for prefix in self._known_mcp_prefixes
+        )
+        raw_hash = meta.get("mcp_schema_hash")
+        runtime_schema_hash = raw_hash if isinstance(raw_hash, str) else None
         res = resolve_tool_resource(
             call.tool_name,
             args,
             workspace_root=self._workspace_root,
             main_conversation_id=main_conv_id if isinstance(main_conv_id, str) else None,
             tool_kind=tool_def.tool_kind,
+            mcp_policy=self._mcp_policies.get(call.tool_name),
+            is_mcp_tool=is_mcp_tool,
+            runtime_schema_hash=runtime_schema_hash,
         )
         if res.lock_mode == "none":
             return await handler(args)  # pyright: ignore[reportAny]

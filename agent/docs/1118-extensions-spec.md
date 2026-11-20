@@ -31,8 +31,22 @@
     - 跨工作区 `shell` → 命中 `review.cmd.outside_workspace_access`；未绑定工作区 → fail-closed；
     - `load_capability`（`tool_kind="capability-load"`）在 `ToolExecutionQueueHook` 中归为 `lock_mode="none"`，避免误抢工作区写锁。
 
-### 3. MCP 渐进披露与懒连接（基于 `pydantic_ai.capabilities.MCP`）
-- **配置边界**：支持合并「全局配置（`~/.agent/mcp.json`）+ 当前工作区自身配置（`<work_path>/.agent/mcp.json`）」，遵循 `AGENTS.md` 边界原则，不向上继承父目录。
+### 3. MCP 渐进披露、认证模型与懒连接（基于 `MCPToolset` + `MCP` Capability）
+- **协议与复用底座**：基于已安装的 `mcp`（支持 `2026-07-28` 无状态协议、`server/discover`、MRTR 与 Extensions）+ `fastmcp` + `pydantic_ai.mcp.MCPToolset`，由底层统一屏蔽无状态 HTTP 与有状态 Stdio/SSE 差异。由于 `pydantic_ai.capabilities.MCP(url=...)` 不透传 `auth` / `verify` / `StdioTransport`，且 `load_mcp_toolsets()` 不支持 `auth` 与两级合并，统一由自研薄 Loader 构造配置完整的 `MCPToolset` 后封装为 `MCP(local=toolset, ...)`（或按 `defer_loading` 挂载）。
+- **配置边界**：支持合并「全局配置（`~/.agent/mcp.json`）+ 当前工作区自身配置（`<work_path>/.agent/mcp.json`）」，支持 `${VAR}` / `${VAR:-default}` 环境变量展开；遵循 `AGENTS.md` 边界原则，不向上继承父目录。项目级配置不得越权读取或复用全局同名 Server 的已授权 OAuth Token。
+- **MCP 认证模型（Auth）**：
+  - **Stdio**：通过 `command` / `args` / `env`（`${VAR}` 注入）传递本地凭据，不走 HTTP OAuth。
+  - **HTTP / SSE**：支持 `headers`（自定义 Header）以及结构化 `auth` 块：
+    - `none`（默认）；
+    - `bearer`：`token`（支持 `${VAR}`，映射为 `fastmcp.client.auth.BearerAuth`）；
+    - `oauth`（OAuth 2.1 + PKCE + RFC 9728 `401 WWW-Authenticate` 自动发现 + RFC 8707 `resource` 绑定 + RFC 9207 `iss` 校验 + CIMD `client_metadata_url`）：支持 `scopes`、`client_id`、`client_secret`、`callback_port`、`client_metadata_url`；
+    - `oauth_client_credentials`（无头 M2M，映射为 `ClientCredentialsOAuthProvider`）：支持 `client_id`、`client_secret`、`scopes`、`token_endpoint_auth_method`、`issuer`；
+    - `oauth_private_key_jwt`（可选扩展）：JWT 断言认证。
+  - **OAuth Token 持久化与交互/无头分离**：复用 `py-key-value-aio` 的 `FileTreeStore`（存放在 `~/.agent/mcp_tokens/`，目录 `0700` / 文件 `0600`，支持可选 `FernetEncryptionWrapper` 静态加密）作为 `token_storage`，存储键绑定 `(scope, server_name, endpoint_fingerprint)`。`oauth`（PKCE）初次授权由 **CLI 交互模式/授权命令**完成并落盘；若启动 `Jev` 预编译或后台 Worker 时尚未完成授权，预编译器标记状态为 `auth_required` 并跳过该 Server，**绝不在无头后台阻塞等待浏览器回调**。`oauth_client_credentials` 支持全自动无头换取与预编译。
+- **Elicitation / Sampling 策略（CLI 交互优先，后台无非必要兜底）**：
+  - `MCPToolset` 默认不传 `elicitation_handler` 与 `sampling_model`（均为 `None`），在协议能力协商阶段不声明对应能力，确保绝大多数纯 Tool Server 零副作用、强依赖 Server 直接按工具失败处理而不静默挂死。
+  - **Elicitation**：仅在 **CLI 交互模式**（存在 TTY）下按需注入轻量终端 `elicitation_handler`；后台 `WorkspaceLockManager` Worker 保持 `None`，现阶段不增加跨协程 `Ticket` 挂起兜底。
+  - **Sampling**：前期默认禁用（`None`），避免第三方 MCP Server 擅自触发额外 LLM 消耗；后续仅对显式配置信任的 Server 开放。
 - **多 Role 共享持有（多对多而非唯一绑定）**：
   - 同一 Tool 集或 MCP Server 可同时挂载给多个合适角色（如 `roles: ["researcher", "coder"]` 或 `["coder", "tester"]`），而非排他性 1:1 唯一绑定；
   - 若用户在某 Server 下显式声明 `"roles": [...]`，按指定角色集合挂载；
@@ -84,7 +98,7 @@ flowchart LR
 ### 2. `mcpServer` 去重、版本锁定与策略失效
 - **两层去重**：
   1. **名称去重（`server_name`）**：合并全局与工作区 `mcp.json` 时，**工作区同名 Server 整体覆盖全局条目**（整条替换，不跨源拼接 `command` 与 `args`）。
-  2. **同源去重（`endpoint_fingerprint`）**：对 stdio（规范化 `command + args`）或 HTTP/SSE（规范化 `url`）计算端点指纹；若同一 Role 下存在不同名但同源的 Server，保留高优先级作用域（工作区级）或同级高版本，避免重复注入两份相同工具。
+  2. **同源去重与脱敏指纹（`endpoint_fingerprint`）**：对 stdio（规范化 `command + args`）或 HTTP/SSE（规范化 `url + auth.type + client_id/issuer`）计算端点指纹。**`endpoint_fingerprint` 严禁包含 `token`、`client_secret`、`Authorization` 等动态或敏感凭据**，防止 Token 刷新或密钥轮换误触发全表策略失效；若同一 Role 下存在不同名但同源的 Server，保留高优先级作用域（工作区级）或同级高版本，避免重复注入两份相同工具。
 - **版本锁定与缓存联动**：
   - 尊重项目工作区显式锁定的包版本/配置版本；同作用域多来源声明同一服务（按 `serverInfo.name` 识别）时选较高版本。
   - `mcp_tool_policies` 缓存键强绑定 `(server_name, server_version, tool_name, schema_hash)`：一旦 `@latest` 等配置导致底层 `serverInfo.version` 或任一工具 `inputSchema` 变化，指纹立即失配并仅对该增量工具重跑 `Jev` 定级，防止旧策略误用到新版。

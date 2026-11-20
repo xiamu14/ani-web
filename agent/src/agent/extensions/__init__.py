@@ -1,5 +1,33 @@
 """扩展能力包: 对外暴露渐进披露 Skills 解析器与 Capability 适配器。"""
 
+from agent.extensions.mcp_auth import (
+    DEFAULT_MCP_TOKEN_ROOT,
+    LocalOAuthReadinessChecker,
+    build_fastmcp_auth,
+    build_token_storage,
+    has_persisted_oauth_files,
+    token_namespace_dir,
+)
+from agent.extensions.mcp_config import (
+    McpAuthSpec,
+    McpAuthType,
+    McpConfigIssue,
+    McpMergedConfig,
+    McpScope,
+    McpServerSpec,
+    McpTransportType,
+    compute_endpoint_fingerprint,
+    compute_tool_schema_hash,
+    expand_env_vars,
+    load_mcp_configs,
+    merge_mcp_configs,
+)
+from agent.extensions.mcp_loader import (
+    FastMcpProbeAdapter,
+    build_mcp_capability,
+    build_mcp_toolset,
+    select_mcp_capabilities_for_role,
+)
 from agent.extensions.skill_resolver import (
     BUILTIN_SKILLS_DIR,
     DEFAULT_SKILL_VERSION,
@@ -23,8 +51,18 @@ from agent.extensions.tool_search import (
 
 __all__ = [
     "BUILTIN_SKILLS_DIR",
+    "DEFAULT_MCP_TOKEN_ROOT",
     "DEFAULT_SKILL_VERSION",
     "DeferToolsCapability",
+    "FastMcpProbeAdapter",
+    "LocalOAuthReadinessChecker",
+    "McpAuthSpec",
+    "McpAuthType",
+    "McpConfigIssue",
+    "McpMergedConfig",
+    "McpScope",
+    "McpServerSpec",
+    "McpTransportType",
     "ProgressiveSkillsCapability",
     "ResolvedSkill",
     "ResolvedSkillCatalog",
@@ -36,7 +74,19 @@ __all__ = [
     "ToolDisclosurePolicy",
     "arbitrate_skill_candidates",
     "bilingual_tool_search_fn",
+    "build_fastmcp_auth",
+    "build_mcp_capability",
+    "build_mcp_toolset",
     "build_skills_capability",
+    "build_token_storage",
     "build_tool_search_capabilities",
+    "compute_endpoint_fingerprint",
+    "compute_tool_schema_hash",
+    "expand_env_vars",
+    "has_persisted_oauth_files",
+    "load_mcp_configs",
+    "merge_mcp_configs",
     "parse_semver",
+    "select_mcp_capabilities_for_role",
+    "token_namespace_dir",
 ]

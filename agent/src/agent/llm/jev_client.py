@@ -11,7 +11,8 @@ import logfire
 
 def build_decisions_url(base_url: str) -> str:
     """将 OPENROUTER_BASE_URL 补全为 /alpha/decisions 完整请求地址。"""
-    return f"{base_url.rstrip('/')}/alpha/decisions"
+    cleaned = base_url.rstrip("/").removesuffix("/v1")
+    return f"{cleaned}/alpha/decisions"
 
 
 class JevHttpClient:

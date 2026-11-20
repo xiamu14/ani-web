@@ -12,7 +12,7 @@ import httpx
 import logfire
 
 from agent.llm import JevHttpClient
-from agent.permissions.rules import RuleVerdict, evaluate_tool_rule
+from agent.permissions.rules import McpRuleInfo, RuleVerdict, evaluate_tool_rule
 
 JevRiskVerdict = Literal["ALLOW", "CONFIRM_USER", "DENY"]
 _VALID_VERDICTS: frozenset[str] = frozenset({"ALLOW", "CONFIRM_USER", "DENY"})
@@ -74,6 +74,7 @@ class PermissionReviewer:
         jev_client: JevHttpClient | None = None,
         approval_port: UserApprovalPort | None = None,
         batch_window_seconds: float = 0.015,
+        mcp_policies: Mapping[str, McpRuleInfo] | None = None,
     ) -> None:
         self._jev: JevHttpClient | None = jev_client
         self._approval: UserApprovalPort | None = approval_port
@@ -81,6 +82,11 @@ class PermissionReviewer:
         self._run_grants: dict[str, set[str]] = {}
         self._pending: dict[str, list[_PendingApproval]] = {}
         self._batch_locks: dict[str, asyncio.Lock] = {}
+        self._mcp_policies: dict[str, McpRuleInfo] = dict(mcp_policies or {})
+
+    def set_mcp_policies(self, mcp_policies: Mapping[str, McpRuleInfo]) -> None:
+        """原子替换运行期 MCP 预编译策略索引（key 为运行期工具名）。"""
+        self._mcp_policies = dict(mcp_policies)
 
     def clear_run(self, run_id: str) -> None:
         """单次 Agent Run 结束后销毁其临时同类授权，确保不演变为永久白名单。"""
@@ -96,9 +102,19 @@ class PermissionReviewer:
         args: Mapping[str, object],
         workspace_root: str | Path | None = None,
         user_intent: str = "",
+        is_mcp_tool: bool = False,
+        runtime_schema_hash: str | None = None,
     ) -> AuthorizationResult:
         """执行三级权限裁决: 静态 Rules -> (REVIEW 时) Jev 语义 -> 批量用户确认。"""
-        verdict: RuleVerdict = evaluate_tool_rule(tool_name, args, workspace_root=workspace_root)
+        mcp_policy = self._mcp_policies.get(tool_name)
+        verdict: RuleVerdict = evaluate_tool_rule(
+            tool_name,
+            args,
+            workspace_root=workspace_root,
+            mcp_policy=mcp_policy,
+            is_mcp_tool=is_mcp_tool,
+            runtime_schema_hash=runtime_schema_hash,
+        )
         if verdict.level == "forbid":
             return AuthorizationResult(
                 allowed=False,
