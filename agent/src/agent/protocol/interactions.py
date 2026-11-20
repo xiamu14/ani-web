@@ -470,10 +470,8 @@ class InteractionBroker:
                     note_parts.append(TextContent(content="\n".join(note_lines)))
                 converted.append(
                     AskUserAnswer(
-                        header=ans.header,
-                        selected=tuple(ans.selected),
-                        custom_answer=ans.custom_answer,
-                        note=tuple(note_parts),
+                        header=ans.header, selected=tuple(ans.selected),
+                        custom_answer=ans.custom_answer, note=tuple(note_parts),
                     )
                 )
             resp = AskUserResponse(answers=tuple(converted), cancelled=False)
