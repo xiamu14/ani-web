@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-
 from pydantic_ai.messages import (
     ModelMessage,
     ModelResponse,

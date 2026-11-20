@@ -6,8 +6,7 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
-
-from typing_extensions import override
+from typing import override
 
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.messages import (

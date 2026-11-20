@@ -7,7 +7,12 @@ from typing import Literal, cast
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
-from pydantic_ai.messages import ModelMessage, SystemPromptPart, TextPart, UserPromptPart
+from pydantic_ai.messages import (
+    ModelMessage,
+    SystemPromptPart,
+    TextPart,
+    UserPromptPart,
+)
 from pydantic_ai.models import KnownModelName, Model
 
 from agent.context.tree_manager import BranchInfo

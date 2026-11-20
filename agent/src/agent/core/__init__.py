@@ -9,7 +9,6 @@ from agent.core.roles import (
     build_default_role_registry,
 )
 from agent.core.router import DEFAULT_ROUTER_INSTRUCTIONS, RouterReply, SuperAgentRouter
-from agent.core.scheduler import TicketEventCallback, WorkspaceLockManager
 from agent.core.runtime import (
     ContextSnapshot,
     SuperAgentRuntime,
@@ -18,10 +17,11 @@ from agent.core.runtime import (
     open_runtime,
     run,
 )
+from agent.core.scheduler import TicketEventCallback, WorkspaceLockManager
 
 __all__ = [
-    "ContextSnapshot",
     "DEFAULT_ROUTER_INSTRUCTIONS",
+    "ContextSnapshot",
     "RoleRegistry",
     "RoleSessionManager",
     "RoleSpec",

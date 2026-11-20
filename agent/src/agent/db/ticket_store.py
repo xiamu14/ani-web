@@ -92,9 +92,8 @@ class SQLModelTicketStore:
             created_at=now_iso,
             updated_at=now_iso,
         )
-        async with self._sessions() as session:
-            async with session.begin():
-                session.add(row)
+        async with self._sessions() as session, session.begin():
+            session.add(row)
         return row
 
     async def get_ticket(self, main_conversation_id: str, task_id: str) -> TicketRow | None:
@@ -122,34 +121,32 @@ class SQLModelTicketStore:
         result_summary: str | None = None,
         mandate: str | None = None,
     ) -> TicketRow:
-        async with self._sessions() as session:
-            async with session.begin():
-                row = await session.get(TicketRow, (main_conversation_id, task_id))
-                if row is None:
-                    raise LookupError(f"Ticket ({main_conversation_id!r}, {task_id!r}) not found.")
-                row.status = status
-                if run_id is not None:
-                    row.run_id = run_id
-                if result_summary is not None:
-                    row.result_summary = result_summary
-                if mandate is not None:
-                    row.mandate = mandate
-                row.updated_at = _utc_iso()
-                return row
+        async with self._sessions() as session, session.begin():
+            row = await session.get(TicketRow, (main_conversation_id, task_id))
+            if row is None:
+                raise LookupError(f"Ticket ({main_conversation_id!r}, {task_id!r}) not found.")
+            row.status = status
+            if run_id is not None:
+                row.run_id = run_id
+            if result_summary is not None:
+                row.result_summary = result_summary
+            if mandate is not None:
+                row.mandate = mandate
+            row.updated_at = _utc_iso()
+            return row
 
     async def remove_dependency(self, main_conversation_id: str, cancelled_task_id: str) -> None:
         """当上游任务被显式取消时，自动从同会话下游任务的持久化依赖中移除该 ID。"""
         target = cancelled_task_id.strip().lstrip("@")
-        async with self._sessions() as session:
-            async with session.begin():
-                stmt = select(TicketRow).where(col(TicketRow.main_conversation_id) == main_conversation_id)
-                rows = (await session.execute(stmt)).scalars().all()
-                now_iso = _utc_iso()
-                for row in rows:
-                    deps = parse_depends_on(row.depends_on_json)
-                    if target in deps:
-                        row.depends_on_json = json.dumps([d for d in deps if d != target])
-                        row.updated_at = now_iso
+        async with self._sessions() as session, session.begin():
+            stmt = select(TicketRow).where(col(TicketRow.main_conversation_id) == main_conversation_id)
+            rows = (await session.execute(stmt)).scalars().all()
+            now_iso = _utc_iso()
+            for row in rows:
+                deps = parse_depends_on(row.depends_on_json)
+                if target in deps:
+                    row.depends_on_json = json.dumps([d for d in deps if d != target])
+                    row.updated_at = now_iso
 
     async def get_role_conversation_id(self, main_conversation_id: str, task_id: str) -> str | None:
         row = await self.get_ticket(main_conversation_id, task_id)
@@ -165,19 +162,18 @@ class SQLModelTicketStore:
     ) -> None:
         """绑定 @task_id 与专属 Role conversation_id，并同步补全 conversations 元数据。"""
         now_iso = _utc_iso()
-        async with self._sessions() as session:
-            async with session.begin():
-                ticket = await session.get(TicketRow, (main_conversation_id, task_id))
-                if ticket is None:
-                    raise LookupError(f"Ticket ({main_conversation_id!r}, {task_id!r}) not found.")
-                ticket.role_conversation_id = role_conversation_id
-                ticket.updated_at = now_iso
+        async with self._sessions() as session, session.begin():
+            ticket = await session.get(TicketRow, (main_conversation_id, task_id))
+            if ticket is None:
+                raise LookupError(f"Ticket ({main_conversation_id!r}, {task_id!r}) not found.")
+            ticket.role_conversation_id = role_conversation_id
+            ticket.updated_at = now_iso
 
-                conv = await session.get(ConversationRow, role_conversation_id)
-                if conv is not None:
-                    conv.role_name = role_name
-                    conv.work_path = ticket.work_path
-                    conv.updated_at = now_iso
+            conv = await session.get(ConversationRow, role_conversation_id)
+            if conv is not None:
+                conv.role_name = role_name
+                conv.work_path = ticket.work_path
+                conv.updated_at = now_iso
 
     async def mark_ticket_interrupted(
         self, *, main_conversation_id: str, task_id: str, summary: str

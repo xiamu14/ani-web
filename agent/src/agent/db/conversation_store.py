@@ -22,13 +22,29 @@ from sqlmodel import col, select
 
 from agent.db._conv_helpers import (
     BRANCHES_ADAPTER as _BRANCHES_ADAPTER,
+)
+from agent.db._conv_helpers import (
     DEFERRED_ADAPTER as _DEFERRED_ADAPTER,
+)
+from agent.db._conv_helpers import (
     USAGE_ADAPTER as _USAGE_ADAPTER,
+)
+from agent.db._conv_helpers import (
     derive_parent_conv_id as _derive_parent_conv_id,
+)
+from agent.db._conv_helpers import (
     dump_message as _dump_message,
+)
+from agent.db._conv_helpers import (
     gc_unreachable_entries,
+)
+from agent.db._conv_helpers import (
     load_message as _load_message,
+)
+from agent.db._conv_helpers import (
     row_to_record as _row_to_record,
+)
+from agent.db._conv_helpers import (
     utc_iso as _utc_iso,
 )
 from agent.db.engine import create_session_factory
@@ -246,22 +262,21 @@ class SQLModelConversationStore(ConversationStore):
 
         root_id = str(uuid7())
         now_iso = _utc_iso()
-        async with self._sessions() as session:
-            async with session.begin():
-                session.add(
-                    ContextEntryRow(
-                        id=root_id,
-                        tree_id=self._tree_id,
-                        parent_id=None,
-                        kind="root",
-                        stop_backtrack=0,
-                        message_json=None,
-                        created_at=now_iso,
-                    )
+        async with self._sessions() as session, session.begin():
+            session.add(
+                ContextEntryRow(
+                    id=root_id,
+                    tree_id=self._tree_id,
+                    parent_id=None,
+                    kind="root",
+                    stop_backtrack=0,
+                    message_json=None,
+                    created_at=now_iso,
                 )
-                session.add(
-                    AppStateRow(key=ROOT_ENTRY_KEY, value=root_id, updated_at=now_iso)
-                )
+            )
+            session.add(
+                AppStateRow(key=ROOT_ENTRY_KEY, value=root_id, updated_at=now_iso)
+            )
         return root_id
 
     async def create_conversation_from_root(
@@ -280,46 +295,45 @@ class SQLModelConversationStore(ConversationStore):
         now = datetime.now(UTC)
         now_iso = _utc_iso(now)
 
-        async with self._sessions() as session:
-            async with session.begin():
-                session.add(
-                    ContextEntryRow(
-                        id=init_entry_id,
-                        tree_id=self._tree_id,
-                        parent_id=root_id,
-                        kind="conv_init",
-                        stop_backtrack=0,
-                        message_json=None,
-                        created_at=now_iso,
-                    )
+        async with self._sessions() as session, session.begin():
+            session.add(
+                ContextEntryRow(
+                    id=init_entry_id,
+                    tree_id=self._tree_id,
+                    parent_id=root_id,
+                    kind="conv_init",
+                    stop_backtrack=0,
+                    message_json=None,
+                    created_at=now_iso,
                 )
-                session.add(
-                    ConversationRow(
-                        conversation_id=conv_id,
-                        tree_id=self._tree_id,
-                        parent_conversation_id=_derive_parent_conv_id(scope),
-                        scope=scope,
-                        head_entry_id=init_entry_id,
-                        branch_mode="root_only",
-                        work_path=work_path,
-                        target_title=target_title,
-                        revision=revision,
-                        updated_at=now_iso,
-                    )
+            )
+            session.add(
+                ConversationRow(
+                    conversation_id=conv_id,
+                    tree_id=self._tree_id,
+                    parent_conversation_id=_derive_parent_conv_id(scope),
+                    scope=scope,
+                    head_entry_id=init_entry_id,
+                    branch_mode="root_only",
+                    work_path=work_path,
+                    target_title=target_title,
+                    revision=revision,
+                    updated_at=now_iso,
                 )
-                if scope == "main":
-                    state_row = await session.get(AppStateRow, LAST_ACTIVE_CONV_KEY)
-                    if state_row is None:
-                        session.add(
-                            AppStateRow(
-                                key=LAST_ACTIVE_CONV_KEY,
-                                value=conv_id,
-                                updated_at=now_iso,
-                            )
+            )
+            if scope == "main":
+                state_row = await session.get(AppStateRow, LAST_ACTIVE_CONV_KEY)
+                if state_row is None:
+                    session.add(
+                        AppStateRow(
+                            key=LAST_ACTIVE_CONV_KEY,
+                            value=conv_id,
+                            updated_at=now_iso,
                         )
-                    else:
-                        state_row.value = conv_id
-                        state_row.updated_at = now_iso
+                    )
+                else:
+                    state_row.value = conv_id
+                    state_row.updated_at = now_iso
 
         return ConversationRecord(
             conversation_id=conv_id,

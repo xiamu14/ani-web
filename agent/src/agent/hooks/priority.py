@@ -4,11 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from enum import IntEnum
-from typing import TypeVar
 
 from pydantic_ai.capabilities import AbstractCapability
-
-DepsT = TypeVar("DepsT")
 
 DEFAULT_HOOK_PRIORITY = 50
 
@@ -24,7 +21,7 @@ class HookPriority(IntEnum):
     PERSISTENCE = 90
 
 
-def get_capability_priority(capability: AbstractCapability[DepsT]) -> int:
+def get_capability_priority[DepsT](capability: AbstractCapability[DepsT]) -> int:
     """读取 Capability 的显式 hook_priority，未声明时按已知内置类型推导默认优先级。"""
     explicit = getattr(capability, "hook_priority", None)
     if isinstance(explicit, int) and not isinstance(explicit, bool):
@@ -34,7 +31,7 @@ def get_capability_priority(capability: AbstractCapability[DepsT]) -> int:
     return DEFAULT_HOOK_PRIORITY
 
 
-def sort_capabilities(
+def sort_capabilities[DepsT](
     capabilities: Sequence[AbstractCapability[DepsT]],
 ) -> list[AbstractCapability[DepsT]]:
     """按 HookPriority 稳定排序（同优先级保留原有传入顺序）。"""

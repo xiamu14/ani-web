@@ -6,9 +6,7 @@ import tempfile
 import unittest
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
-
-from typing_extensions import override
+from typing import Any, override
 
 import httpx
 from pydantic_ai import Agent, RunContext

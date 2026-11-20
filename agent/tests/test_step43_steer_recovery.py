@@ -6,8 +6,7 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
-
-from typing_extensions import override
+from typing import override
 
 from pydantic_ai import ModelRetry
 from pydantic_ai.capabilities import AbstractCapability
@@ -23,10 +22,20 @@ from pydantic_ai.messages import (
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.tools import RunContext
 from pydantic_ai.toolsets import AbstractToolset, FunctionToolset
-from pydantic_ai_harness.step_persistence import ContinuableSnapshot, RunRecord, SqliteStepStore
+from pydantic_ai_harness.step_persistence import (
+    ContinuableSnapshot,
+    RunRecord,
+    SqliteStepStore,
+)
 
 from agent.context import ContextTreeManager
-from agent.core import RoleRegistry, RoleSessionManager, RoleSpec, WorkspaceLockManager, open_runtime
+from agent.core import (
+    RoleRegistry,
+    RoleSessionManager,
+    RoleSpec,
+    WorkspaceLockManager,
+    open_runtime,
+)
 from agent.db import (
     SQLModelConversationStore,
     SQLModelTicketStore,
