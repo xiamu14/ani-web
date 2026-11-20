@@ -1,28 +1,56 @@
-"""Super-Agent 前台 Router 协调器: 即时应答用户、工具派发与事件驱动回流。"""
+"""Super-Agent 前台 Router 协调器: 即时应答用户、流式推流、中断/插话、工具派发与事件驱动回流。"""
 
 from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
+from uuid import uuid4
 
 import logfire
 from opentelemetry import context as otel_context
-from pydantic_ai import Agent, AgentRunResult
+from pydantic_ai import Agent, AgentRunResult, CancellationToken, RunContext
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.conversation import Conversation
 from pydantic_ai.conversation_store import ConversationConflict
-from pydantic_ai.exceptions import AgentRunError, ModelAPIError, UsageLimitExceeded
+from pydantic_ai.exceptions import (
+    AgentRunError,
+    ModelAPIError,
+    RunCancelled,
+    UsageLimitExceeded,
+)
+from pydantic_ai.messages import TextContent, UserContent
 from pydantic_ai.models import KnownModelName, Model
+from pydantic_ai_harness.ask_user import AskUser, AskUserRequest, AskUserResponse
 from pydantic_ai_harness.step_persistence import StepPersistence, StepStore
 
+from agent.attachments.ports import AttachmentRegistryPort
 from agent.context import ContextTreeManager, SemanticBranchRouter
 from agent.core.budget import ROUTER_BUDGET_POLICY, LoopBudgetPolicy
 from agent.db import SQLModelConversationStore
-from agent.hooks import RouterContextHook, SemanticRoutingHook, sort_capabilities
+from agent.hooks import (
+    RouterContextHook,
+    RouterSteerHook,
+    SemanticRoutingHook,
+    sort_capabilities,
+)
+from agent.protocol.event_bus import RuntimeEventBus
+from agent.protocol.events_schema import (
+    RunCompletedPayload,
+    RunFailedPayload,
+    RunInterruptedPayload,
+    RunStartedPayload,
+    TreeBranchSwitchedPayload,
+)
+from agent.protocol.interactions import InteractionBroker
+from agent.protocol.stream_bridge import (
+    make_event_stream_handler,
+    to_run_usage_view,
+    verify_citations_for_protocol,
+)
 from agent.tools import (
     RouterDeps,
     TaskDispatchPort,
@@ -47,16 +75,30 @@ DEFAULT_ROUTER_INSTRUCTIONS = """\
 ProactiveReplyHandler = Callable[[str, str], Awaitable[None]]
 
 
+def _extract_prompt_text(prompt: str | Sequence[UserContent]) -> str:
+    if isinstance(prompt, str):
+        return prompt
+    parts: list[str] = []
+    for item in prompt:
+        if isinstance(item, str):
+            parts.append(item)
+        elif isinstance(item, TextContent):
+            parts.append(item.content)
+    return "\n".join(parts)
+
+
 @dataclass(frozen=True, kw_only=True)
 class RouterReply:
     """Router 单次交互的返回结果。"""
 
     conversation_id: str
     output: str
+    run_id: str = ""
+    interrupted: bool = False
 
 
 class SuperAgentRouter:
-    """前台协调器：装配 Hooks 与工具集，处理用户消息与后台事件。"""
+    """前台协调器：装配 Hooks 与工具集，处理用户消息、流式应答、中断插话与后台事件。"""
 
     def __init__(
         self,
@@ -71,14 +113,24 @@ class SuperAgentRouter:
         on_proactive_reply: ProactiveReplyHandler | None = None,
         tool_coordinator: ToolLockCoordinator | None = None,
         budget_policy: LoopBudgetPolicy = ROUTER_BUDGET_POLICY,
+        event_bus: RuntimeEventBus | None = None,
+        interaction_broker: InteractionBroker | None = None,
+        attachment_registry: AttachmentRegistryPort | None = None,
+        extra_capabilities: Sequence[AbstractCapability[RouterDeps]] = (),
     ) -> None:
         self._context_tree: ContextTreeManager = context_tree
         self._store: SQLModelConversationStore = conversation_store
         self._tasks: TaskDispatchPort | None = task_dispatcher
         self._on_proactive_reply: ProactiveReplyHandler | None = on_proactive_reply
         self._budget_policy: LoopBudgetPolicy = budget_policy
+        self._event_bus: RuntimeEventBus | None = event_bus
+        self._interaction_broker: InteractionBroker | None = interaction_broker
+        self._attachments: AttachmentRegistryPort | None = attachment_registry
         self._pending_events: dict[str, deque[str]] = {}
+        self._steer_queues: dict[str, deque[str]] = {}
         self._running_conversations: set[str] = set()
+        self._active_cancel_tokens: dict[str, CancellationToken] = {}
+        self._active_run_ids: dict[str, str] = {}
         self._conv_locks: dict[str, asyncio.Lock] = {}
         self._routing_hook: SemanticRoutingHook = SemanticRoutingHook(
             context_tree, semantic_router=semantic_router
@@ -86,8 +138,32 @@ class SuperAgentRouter:
 
         capabilities: list[AbstractCapability[RouterDeps]] = [
             RouterContextHook(self._pending_events, self._context_tree),
-            cast(AbstractCapability[RouterDeps], ToolExecutionQueueHook(coordinator=tool_coordinator)),
+            RouterSteerHook(self._steer_queues),
+            cast(
+                AbstractCapability[RouterDeps],
+                ToolExecutionQueueHook(coordinator=tool_coordinator),
+            ),
+            *extra_capabilities,
         ]
+        if interaction_broker is not None:
+
+            async def _router_ask_user(
+                ctx: RunContext[RouterDeps], req: AskUserRequest
+            ) -> AskUserResponse:
+                return await interaction_broker.answer_ask_user(
+                    req,
+                    conversation_id=ctx.deps.main_conversation_id,
+                    task_id=None,
+                    role_name="router",
+                    run_id=ctx.run_id or None,
+                )
+
+            capabilities.append(
+                cast(
+                    AbstractCapability[RouterDeps],
+                    AskUser[RouterDeps](answerer=_router_ask_user),
+                )
+            )
         if step_store is not None:
             capabilities.append(
                 StepPersistence(store=step_store, agent_name="router", capture_frontier=True)
@@ -106,45 +182,169 @@ class SuperAgentRouter:
     def _conv_lock(self, conversation_id: str) -> asyncio.Lock:
         return self._conv_locks.setdefault(conversation_id, asyncio.Lock())
 
+    def is_running(self, conversation_id: str) -> bool:
+        return conversation_id in self._running_conversations
+
+    def steer_conversation(self, conversation_id: str, instruction: str) -> bool:
+        """向正在运行的 Router 会话实时注入用户建议（下一轮请求前生效）。"""
+        if conversation_id not in self._running_conversations:
+            return False
+        self._steer_queues.setdefault(conversation_id, deque()).append(instruction)
+        return True
+
+    async def interrupt_conversation(
+        self,
+        conversation_id: str,
+        *,
+        reason: Literal["user_interrupt", "shutdown", "task_cancelled"] = "user_interrupt",
+    ) -> tuple[bool, str | None, str | None]:
+        """优雅中断当前运行中的 Router 生成并清理挂起交互。"""
+        _ = reason
+        token = self._active_cancel_tokens.get(conversation_id)
+        run_id = self._active_run_ids.get(conversation_id)
+        if token is None:
+            return False, None, None
+        token.cancel()
+        if self._interaction_broker is not None:
+            _ = self._interaction_broker.cancel_for_scope(
+                run_id=run_id,
+                conversation_id=conversation_id,
+                reason="run_cancelled",
+            )
+        # 等待当前持锁 run 完成修复落盘
+        async with self._conv_lock(conversation_id):
+            rec = await self._store.read_record(conversation_id)
+            return True, run_id, rec.head_id if rec is not None else None
+
     async def switch_conversation(self, conversation_id: str) -> Conversation:
         """用户显式指令切换分支（仅切换已有会话，绝不新建）。"""
-        return await self._context_tree.switch_conversation(conversation_id)
+        prev = self._context_tree.active_conversation_id
+        conv = await self._context_tree.switch_conversation(conversation_id)
+        if self._event_bus is not None and prev != conversation_id:
+            _ = self._event_bus.publish(
+                "tree.branch_switched",
+                TreeBranchSwitchedPayload(
+                    previous_conversation_id=prev,
+                    active_conversation_id=conversation_id,
+                    reason="user_switch",
+                ),
+                conversation_id=conversation_id,
+            )
+        return conv
 
     async def handle_user_message(
         self,
-        prompt: str,
+        prompt: str | Sequence[UserContent],
         *,
         conversation_id: str | None = None,
         work_path: str | Path | None = None,
+        routing_mode: Literal["auto", "pinned"] = "auto",
+        delivery_mode: Literal["auto", "steer", "queue", "interrupt_and_send"] = "auto",
+        run_id: str | None = None,
     ) -> RouterReply:
-        """经前置语义路由 Hook 解析目标分支后，立即执行对话并落盘。"""
-        conv = await self._routing_hook.resolve_conversation(
-            prompt, conversation_id=conversation_id, work_path=work_path
-        )
+        """经前置语义路由解析目标分支后，执行流式/非流式对话并落盘。"""
+        prompt_text = _extract_prompt_text(prompt)
+        if routing_mode == "pinned" and conversation_id is not None:
+            conv = await self._context_tree.switch_conversation(conversation_id)
+        else:
+            conv = await self._routing_hook.resolve_conversation(
+                prompt_text, conversation_id=conversation_id, work_path=work_path
+            )
         target_id = conv.conversation_id
+
+        if target_id in self._running_conversations:
+            if delivery_mode == "steer":
+                _ = self.steer_conversation(target_id, prompt_text)
+                return RouterReply(
+                    conversation_id=target_id,
+                    output="",
+                    run_id=self._active_run_ids.get(target_id, ""),
+                )
+            if delivery_mode == "interrupt_and_send":
+                _ = await self.interrupt_conversation(target_id)
+
+        effective_run_id = run_id or f"run_{uuid4().hex[:12]}"
         async with self._conv_lock(target_id):
             latest_conv = await self._context_tree.load_conversation(target_id)
+            start_rec = await self._store.read_record(target_id)
             deps = RouterDeps(
-                main_conversation_id=target_id,
-                workspace=self._context_tree,
-                tasks=self._tasks,
+                main_conversation_id=target_id, workspace=self._context_tree, tasks=self._tasks
             )
+            cancel_token = CancellationToken()
             self._running_conversations.add(target_id)
+            self._active_cancel_tokens[target_id] = cancel_token
+            self._active_run_ids[target_id] = effective_run_id
+            if self._event_bus is not None:
+                _ = self._event_bus.publish(
+                    "run.started",
+                    RunStartedPayload(
+                        agent_kind="router", proactive=False,
+                        entry_id=start_rec.head_id if start_rec is not None else None,
+                        user_message_preview=prompt_text[:160],
+                    ),
+                    conversation_id=target_id, role_name="router", run_id=effective_run_id,
+                )
+            stream_handler = (
+                make_event_stream_handler(
+                    self._event_bus, conversation_id=target_id, role_name="router", proactive=False
+                )
+                if self._event_bus is not None
+                else None
+            )
             try:
                 result = await self._agent.run(
-                    prompt,
-                    conversation=latest_conv,
-                    deps=deps,
+                    prompt, conversation=latest_conv, deps=deps, run_id=effective_run_id,
+                    cancellation_token=cancel_token, event_stream_handler=stream_handler,
                     usage_limits=self._budget_policy.to_usage_limits(),
                     timeout=self._budget_policy.wall_clock_timeout_sec,
                 )
+            except RunCancelled:
+                repaired = await self._context_tree.repair_interrupted_conversation(target_id)
+                rec = await self._store.read_record(target_id)
+                head_id = rec.head_id if rec is not None else (start_rec.head_id if start_rec else None)
+                if self._event_bus is not None:
+                    _ = self._event_bus.publish(
+                        "run.interrupted",
+                        RunInterruptedPayload(
+                            reason="user_interrupt",
+                            repaired_message_count=1 if repaired else 0,
+                            head_entry_id=head_id,
+                        ),
+                        conversation_id=target_id, role_name="router", run_id=effective_run_id,
+                    )
+                return RouterReply(conversation_id=target_id, output="", run_id=effective_run_id, interrupted=True)
+            except (AgentRunError, ModelAPIError, UsageLimitExceeded, TimeoutError) as exc:
+                if self._event_bus is not None:
+                    _ = self._event_bus.publish(
+                        "run.failed",
+                        RunFailedPayload(error_code=type(exc).__name__, error_message=str(exc)),
+                        conversation_id=target_id, role_name="router", run_id=effective_run_id,
+                    )
+                raise
             finally:
                 self._running_conversations.discard(target_id)
-            await self._save_result(target_id, result)
-            await self._drain_pending_events(target_id)
-            return RouterReply(conversation_id=target_id, output=result.output)
+                _ = self._active_cancel_tokens.pop(target_id, None)
+                _ = self._active_run_ids.pop(target_id, None)
 
-    def enqueue_system_notice(self, main_conversation_id: str, summary: str, *, kind: str = "recovery") -> None:
+            await self._save_result(target_id, result)
+            if self._event_bus is not None:
+                rec = await self._store.read_record(target_id)
+                citations = verify_citations_for_protocol(result.output, self._attachments)
+                _ = self._event_bus.publish(
+                    "run.completed",
+                    RunCompletedPayload(
+                        output_text=result.output, citations=citations,
+                        usage=to_run_usage_view(result.usage, budget_policy=self._budget_policy),
+                        head_entry_id=rec.head_id if rec is not None else None, proactive=False,
+                    ),
+                    conversation_id=target_id, role_name="router", run_id=effective_run_id,
+                )
+            await self._drain_pending_events(target_id)
+            return RouterReply(conversation_id=target_id, output=result.output, run_id=effective_run_id)
+
+    def enqueue_system_notice(
+        self, main_conversation_id: str, summary: str, *, kind: str = "recovery"
+    ) -> None:
         """在启动恢复等场景下将系统提示注入待投递事件队列，于下次对话时自动告知 Router。"""
         report = f'<ticket_report kind="{kind}">\n{summary}\n</ticket_report>'
         self._pending_events.setdefault(main_conversation_id, deque()).append(report)
@@ -177,8 +377,25 @@ class SuperAgentRouter:
             workspace=self._context_tree,
             tasks=self._tasks,
         )
+        proactive_run_id = f"run_{uuid4().hex[:12]}"
         self._running_conversations.add(conversation_id)
         otel_token = otel_context.attach(otel_context.Context())
+        if self._event_bus is not None:
+            _ = self._event_bus.publish(
+                "run.started",
+                RunStartedPayload(agent_kind="router", proactive=True, user_message_preview="后台任务进展播报"),
+                conversation_id=conversation_id, role_name="router", run_id=proactive_run_id,
+            )
+        stream_handler = (
+            make_event_stream_handler(
+                self._event_bus,
+                conversation_id=conversation_id,
+                role_name="router",
+                proactive=True,
+            )
+            if self._event_bus is not None
+            else None
+        )
         try:
             with logfire.span(
                 "router proactive_report",
@@ -188,6 +405,8 @@ class SuperAgentRouter:
                     f"后台任务有新进展，请向用户简洁播报结果：\n{report}",
                     conversation=conv,
                     deps=deps,
+                    run_id=proactive_run_id,
+                    event_stream_handler=stream_handler,
                     usage_limits=self._budget_policy.to_usage_limits(),
                     timeout=self._budget_policy.wall_clock_timeout_sec,
                 )
@@ -198,13 +417,38 @@ class SuperAgentRouter:
                 error=str(exc),
             )
             fallback_output = f"[后台任务通知]\n{report}"
+            if self._event_bus is not None:
+                _ = self._event_bus.publish(
+                    "run.completed",
+                    RunCompletedPayload(output_text=fallback_output, proactive=True),
+                    conversation_id=conversation_id,
+                    role_name="router",
+                    run_id=proactive_run_id,
+                )
             if self._on_proactive_reply is not None:
                 await self._on_proactive_reply(conversation_id, fallback_output)
             return fallback_output
         finally:
             otel_context.detach(otel_token)
             self._running_conversations.discard(conversation_id)
+
         await self._save_result(conversation_id, result)
+        if self._event_bus is not None:
+            rec = await self._store.read_record(conversation_id)
+            _ = self._event_bus.publish(
+                "run.completed",
+                RunCompletedPayload(
+                    output_text=result.output,
+                    usage=to_run_usage_view(
+                        result.usage, budget_policy=self._budget_policy
+                    ),
+                    head_entry_id=rec.head_id if rec is not None else None,
+                    proactive=True,
+                ),
+                conversation_id=conversation_id,
+                role_name="router",
+                run_id=proactive_run_id,
+            )
         if self._on_proactive_reply is not None:
             await self._on_proactive_reply(conversation_id, result.output)
         return result.output

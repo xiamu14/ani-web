@@ -12,7 +12,11 @@ from agent.hooks.priority import (
     get_capability_priority,
     sort_capabilities,
 )
-from agent.hooks.router_hooks import RouterContextHook, WorkspacePromptPort
+from agent.hooks.router_hooks import (
+    RouterContextHook,
+    RouterSteerHook,
+    WorkspacePromptPort,
+)
 from agent.hooks.semantic_hook import SemanticRoutingHook
 from agent.hooks.steer_hook import TaskSteerHook
 
@@ -25,6 +29,7 @@ __all__ = [
     "LoopSafetyGuardHook",
     "PermissionGuardHook",
     "RouterContextHook",
+    "RouterSteerHook",
     "SemanticRoutingHook",
     "TaskSteerHook",
     "WorkspacePromptPort",

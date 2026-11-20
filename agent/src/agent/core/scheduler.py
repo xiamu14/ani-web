@@ -6,14 +6,23 @@ import asyncio
 from collections import deque
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
+from typing import cast
+from uuid import uuid4
 
 import logfire
 from opentelemetry import context as otel_context
+from pydantic_ai import CancellationToken
 from pydantic_ai._http import AsyncHTTPClient
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.conversation_store import ConversationStore
-from pydantic_ai.exceptions import AgentRunError, ModelAPIError, UsageLimitExceeded
+from pydantic_ai.exceptions import (
+    AgentRunError,
+    ModelAPIError,
+    RunCancelled,
+    UsageLimitExceeded,
+)
 from pydantic_ai.workspaces import LocalWorkspaceBackend
+from pydantic_ai_harness.ask_user import AskUser
 from pydantic_ai_harness.step_persistence import StepStore
 
 from agent.attachments import AttachmentRegistry
@@ -39,6 +48,9 @@ from agent.memory import (
     prepare_role_memory_bundle,
 )
 from agent.permissions import McpToolPolicy, PermissionReviewer
+from agent.protocol.event_bus import RuntimeEventBus
+from agent.protocol.interactions import InteractionBroker
+from agent.protocol.task_tracker import TaskProtocolBridge
 from agent.tools import (
     DispatchReceipt,
     LockMode,
@@ -58,25 +70,16 @@ class WorkspaceLockManager:
     """按规范化 work_path（含父子目录重叠）维护读写锁、Steer/Revise 与恢复调度器。"""
 
     def __init__(
-        self,
-        *,
-        roles: RoleRegistry,
-        sessions: RoleSessionManager,
-        ticket_store: SQLModelTicketStore,
-        step_store: StepStore | None = None,
-        on_event: TicketEventCallback | None = None,
-        permission_reviewer: PermissionReviewer | None = None,
-        tool_coordinator: ToolLockCoordinator | None = None,
-        mcp_specs: Sequence[McpServerSpec] = (),
-        mcp_policies: Mapping[str, McpToolPolicy] | None = None,
-        mcp_blocked_servers: frozenset[str] = _EMPTY_FROZENSET,
-        mcp_prefixes: Sequence[str] = (),
-        mcp_token_root: Path | None = None,
-        elicitation_handler: McpElicitationHandler | None = None,
-        mcp_http_client: AsyncHTTPClient | None = None,
-        memory_store: MemoryStorePort | None = None,
-        llm_controller: LlmConcurrencyController | None = None,
-        attachment_registry: AttachmentRegistry | None = None,
+        self, *, roles: RoleRegistry, sessions: RoleSessionManager, ticket_store: SQLModelTicketStore,
+        step_store: StepStore | None = None, on_event: TicketEventCallback | None = None,
+        permission_reviewer: PermissionReviewer | None = None, tool_coordinator: ToolLockCoordinator | None = None,
+        mcp_specs: Sequence[McpServerSpec] = (), mcp_policies: Mapping[str, McpToolPolicy] | None = None,
+        mcp_blocked_servers: frozenset[str] = _EMPTY_FROZENSET, mcp_prefixes: Sequence[str] = (),
+        mcp_token_root: Path | None = None, elicitation_handler: McpElicitationHandler | None = None,
+        mcp_http_client: AsyncHTTPClient | None = None, memory_store: MemoryStorePort | None = None,
+        llm_controller: LlmConcurrencyController | None = None, attachment_registry: AttachmentRegistry | None = None,
+        event_bus: RuntimeEventBus | None = None, interaction_broker: InteractionBroker | None = None,
+        extra_role_capabilities_factory: Callable[[str, str, str], Sequence[AbstractCapability[object]]] | None = None,
     ) -> None:
         self._roles: RoleRegistry = roles
         self._sessions: RoleSessionManager = sessions
@@ -95,8 +98,18 @@ class WorkspaceLockManager:
         self._memory_store: MemoryStorePort | None = memory_store
         self._llm_controller: LlmConcurrencyController | None = llm_controller
         self._attachment_registry: AttachmentRegistry | None = attachment_registry
+        self._event_bus: RuntimeEventBus | None = event_bus
+        self._interaction_broker: InteractionBroker | None = interaction_broker
+        self._extra_role_caps_factory: Callable[[str, str, str], Sequence[AbstractCapability[object]]] | None = extra_role_capabilities_factory
         self._state: LockQueueState = LockQueueState()
+        self._bridge: TaskProtocolBridge = TaskProtocolBridge(
+            event_bus=event_bus,
+            interaction_broker=interaction_broker,
+            lock_state=self._state,
+            roles=roles,
+        )
         self._tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
+        self._cancel_tokens: dict[tuple[str, str], CancellationToken] = {}
         self._steer_queues: dict[tuple[str, str], deque[str]] = {}
         self._run_prompts: dict[tuple[str, str], str] = {}
         self._dispatch_lock: asyncio.Lock = asyncio.Lock()
@@ -134,12 +147,11 @@ class WorkspaceLockManager:
         async with self._dispatch_lock:
             task_id = await self._ticket_store.next_task_id(main_conversation_id)
             self._state.mark_unfinished(main_conversation_id, task_id)
-
             if self._state.can_acquire(
                 main_conversation_id=main_conversation_id, task_id=task_id,
                 norm_path=norm_path, lock_mode=effective_lock, depends_on=deps,
             ):
-                _ = await self._ticket_store.create_ticket(
+                row = await self._ticket_store.create_ticket(
                     main_conversation_id=main_conversation_id, task_id=task_id, role_name=role.name,
                     mandate=mandate, work_path=norm_path, lock_mode=effective_lock, depends_on=deps, status="running",
                 )
@@ -147,19 +159,20 @@ class WorkspaceLockManager:
                     main_conversation_id=main_conversation_id, task_id=task_id,
                     norm_path=norm_path, lock_mode=effective_lock,
                 )
+                self._bridge.emit_created(row, queue_position=0)
+                self._bridge.emit_locks_changed()
                 self._spawn_worker(main_conversation_id, task_id)
                 return DispatchReceipt(task_id=task_id, status="running", work_path=norm_path)
-
-            _ = await self._ticket_store.create_ticket(
+            row = await self._ticket_store.create_ticket(
                 main_conversation_id=main_conversation_id, task_id=task_id, role_name=role.name,
                 mandate=mandate, work_path=norm_path, lock_mode=effective_lock, depends_on=deps, status="queued",
             )
-            pos = self._state.enqueue(
-                QueuedTask(
-                    main_conversation_id=main_conversation_id, task_id=task_id,
-                    norm_path=norm_path, lock_mode=effective_lock, depends_on=deps,
-                )
-            )
+            pos = self._state.enqueue(QueuedTask(
+                main_conversation_id=main_conversation_id, task_id=task_id,
+                norm_path=norm_path, lock_mode=effective_lock, depends_on=deps,
+            ))
+            self._bridge.emit_created(row, queue_position=pos)
+            self._bridge.emit_locks_changed()
             return DispatchReceipt(task_id=task_id, status="queued", queue_position=pos, work_path=norm_path)
 
     async def inspect_workspace_locks(self, work_path: str | None = None) -> Sequence[WorkspaceLockStatus]:
@@ -175,12 +188,20 @@ class WorkspaceLockManager:
 
         if ticket.status == "running" and key in self._tasks:
             self._steer_queues.setdefault(key, deque()).append(instruction)
+            self._bridge.emit_steered(
+                main_conversation_id=main_conversation_id, task_id=norm_id,
+                role_name=ticket.role_name, mode="live_steer", instruction=instruction,
+            )
             return f"已向运行中的 @{norm_id} 注入实时纠偏指令（将在下一轮模型请求前生效）。"
 
         if ticket.status == "queued":
             merged = f"{ticket.mandate}\n\n[追加要求]\n{instruction}"
             _ = await self._ticket_store.update_ticket_status(
                 main_conversation_id, norm_id, status="queued", mandate=merged
+            )
+            self._bridge.emit_steered(
+                main_conversation_id=main_conversation_id, task_id=norm_id,
+                role_name=ticket.role_name, mode="queued_merge", instruction=instruction,
             )
             return f"已将追加指令合并到排队中的 @{norm_id}。"
 
@@ -205,14 +226,11 @@ class WorkspaceLockManager:
                 )
                 self._spawn_worker(main_conversation_id, norm_id)
                 return f"已基于原上下文链重新启动 @{norm_id}（Revise/Retry 运行中）。"
-
             _ = await self._ticket_store.update_ticket_status(main_conversation_id, norm_id, status="queued")
-            pos = self._state.enqueue(
-                QueuedTask(
-                    main_conversation_id=main_conversation_id, task_id=norm_id,
-                    norm_path=norm_path, lock_mode=effective_lock, depends_on=deps,
-                )
-            )
+            pos = self._state.enqueue(QueuedTask(
+                main_conversation_id=main_conversation_id, task_id=norm_id,
+                norm_path=norm_path, lock_mode=effective_lock, depends_on=deps,
+            ))
             return f"@{norm_id} 已重新加入排队队列第 {pos} 位，等待工作区锁或前置依赖完成。"
 
     async def cancel_task(self, *, main_conversation_id: str, task_id: str) -> str:
@@ -225,23 +243,32 @@ class WorkspaceLockManager:
 
         running_task = self._tasks.get(key)
         if ticket.status == "running" and running_task is not None and not running_task.done():
-            _ = running_task.cancel()
-            _ = await asyncio.gather(running_task, return_exceptions=True)
+            token = self._cancel_tokens.get(key)
+            if token is not None:
+                token.cancel()
+            if self._interaction_broker is not None:
+                _ = self._interaction_broker.cancel_for_scope(
+                    task_id=norm_id, conversation_id=main_conversation_id, reason="run_cancelled"
+                )
+            try:
+                _ = await asyncio.wait_for(asyncio.shield(running_task), timeout=2.0)
+            except TimeoutError:
+                _ = running_task.cancel()
+                _ = await asyncio.gather(running_task, return_exceptions=True)
+            except asyncio.CancelledError:
+                pass
             return f"已取消运行中的 @{norm_id}，并自动解除下游对其依赖。"
-
         if ticket.status in ("completed", "cancelled"):
             return f"任务 @{norm_id} 当前已是 {ticket.status}，无需重复取消。"
-
         started: list[QueuedTask] = []
         async with self._dispatch_lock:
             _ = self._state.drop_queued(main_conversation_id, norm_id)
             self._state.remove_dependency(main_conversation_id, norm_id)
-            _ = await self._ticket_store.update_ticket_status(
-                main_conversation_id, norm_id, status="cancelled"
-            )
+            updated_row = await self._ticket_store.update_ticket_status(main_conversation_id, norm_id, status="cancelled")
             await self._ticket_store.remove_dependency(main_conversation_id, norm_id)
+            self._bridge.emit_status_changed(updated_row)
             started = await self._start_ready_tasks_locked()
-
+            self._bridge.emit_locks_changed()
         await self._emit_started(started)
         return f"已取消 @{norm_id}，并自动解除下游对其依赖。"
 
@@ -252,9 +279,7 @@ class WorkspaceLockManager:
         if self._step_store is None:
             return [], []
         interrupted_ids, auto_requeue_ids = await self._ticket_store.recover_main_conversation_tasks(
-            main_conversation_id,
-            conversation_store=conversation_store,
-            step_store=self._step_store,
+            main_conversation_id, conversation_store=conversation_store, step_store=self._step_store
         )
         rows = await self._ticket_store.list_tickets(main_conversation_id)
         started: list[QueuedTask] = []
@@ -264,20 +289,19 @@ class WorkspaceLockManager:
                     self._state.mark_settled(main_conversation_id, row.task_id, blocked=True)
                 elif row.status == "queued" and not self._state.is_queued(main_conversation_id, row.task_id):
                     self._state.mark_unfinished(main_conversation_id, row.task_id)
-                    _ = self._state.enqueue(
-                        QueuedTask(
-                            main_conversation_id=main_conversation_id,
-                            task_id=row.task_id,
-                            norm_path=self._state.normalize_path(row.work_path),
-                            lock_mode=as_lock_mode(row.lock_mode),
-                            depends_on=parse_depends_on(row.depends_on_json),
-                        )
-                    )
+                    _ = self._state.enqueue(QueuedTask(
+                        main_conversation_id=main_conversation_id, task_id=row.task_id,
+                        norm_path=self._state.normalize_path(row.work_path),
+                        lock_mode=as_lock_mode(row.lock_mode), depends_on=parse_depends_on(row.depends_on_json),
+                    ))
             if auto_requeue_ids:
                 started = await self._start_ready_tasks_locked()
-
         await self._emit_started(started)
         return interrupted_ids, auto_requeue_ids
+
+    @property
+    def protocol_bridge(self) -> TaskProtocolBridge:
+        return self._bridge
 
     async def list_tasks(self, main_conversation_id: str) -> Sequence[TaskSummary]:
         rows = await self._ticket_store.list_tickets(main_conversation_id)
@@ -305,17 +329,19 @@ class WorkspaceLockManager:
         steer_queue = self._steer_queues.setdefault(key, deque())
         prompt_text = self._run_prompts.pop(key, ticket.mandate)
         otel_token = otel_context.attach(otel_context.Context())
-        blocked_downstream = True
-        status_persisted = False
+        blocked_downstream, status_persisted = True, False
         pending_event: tuple[str, str] | None = None
         perm_hook: PermissionGuardHook | None = None
-
+        worker_run_id = f"run_{uuid4().hex[:12]}"
+        cancel_token = CancellationToken()
+        self._cancel_tokens[key] = cancel_token
         try:
             with logfire.span(
                 "role_worker {task_id} ({role_name})", main_conversation_id=main_conversation_id,
                 task_id=task_id, role_name=role.name, work_path=ticket.work_path,
             ):
-                _ = await self._ticket_store.update_ticket_status(main_conversation_id, task_id, status="running")
+                running_row = await self._ticket_store.update_ticket_status(main_conversation_id, task_id, status="running")
+                self._bridge.emit_status_changed(running_row)
                 role_conv = await self._sessions.load_task_conversation(
                     main_conversation_id=main_conversation_id, task_id=task_id,
                     role_name=role.name, role_instructions=role.instructions,
@@ -327,9 +353,8 @@ class WorkspaceLockManager:
                 )
                 policy = role.effective_budget_policy()
                 trace = ToolExecutionTrace()
-                safety_hook = LoopSafetyGuardHook(policy=policy, trace=trace)
                 extra_caps: list[AbstractCapability[object]] = [
-                    safety_hook,
+                    LoopSafetyGuardHook(policy=policy, trace=trace),
                     TaskSteerHook(steer_queue, max_injections=policy.max_steer_injections),
                     ToolExecutionQueueHook(
                         workspace_root=ticket.work_path, coordinator=self._tool_coordinator,
@@ -346,22 +371,31 @@ class WorkspaceLockManager:
                     perm_hook = PermissionGuardHook(
                         reviewer=self._permission_reviewer, workspace_root=ticket.work_path,
                         user_intent=prompt_text, known_mcp_prefixes=self._mcp_prefixes, trace=trace,
+                        main_conversation_id=main_conversation_id, task_id=task_id, role_name=role.name,
                     )
                     extra_caps.append(perm_hook)
-                role_model = (
-                    self._llm_controller.wrap_role_model(role.model)
-                    if self._llm_controller is not None
-                    else None
-                )
+                if self._interaction_broker is not None:
+                    answerer = self._interaction_broker.make_ask_user_answerer(
+                        conversation_id=main_conversation_id, task_id=task_id, role_name=role.name
+                    )
+                    extra_caps.append(cast(AbstractCapability[object], AskUser(answerer=answerer)))
+                if self._extra_role_caps_factory is not None:
+                    extra_caps.extend(self._extra_role_caps_factory(main_conversation_id, task_id, role.name))
+                role_model = self._llm_controller.wrap_role_model(role.model) if self._llm_controller is not None else None
                 agent = role.build_agent(
                     step_store=self._step_store, extra_capabilities=extra_caps,
                     extra_toolsets=mem_bundle.toolsets, extra_instructions=mem_bundle.extra_instructions,
                     model_override=role_model,
                 )
+                stream_handler = self._bridge.start_worker_stream(
+                    main_conversation_id=main_conversation_id, task_id=task_id, role_name=role.name,
+                    run_id=worker_run_id, prompt_text=prompt_text, trace=trace,
+                )
                 workspace = LocalWorkspaceBackend(ticket.work_path) if ticket.work_path else None
                 async with agent:
                     result = await agent.run(
                         prompt_text, conversation=role_conv, workspace=workspace,
+                        run_id=worker_run_id, cancellation_token=cancel_token, event_stream_handler=stream_handler,
                         usage_limits=policy.to_usage_limits(), timeout=policy.wall_clock_timeout_sec,
                     )
                 await self._sessions.save_task_result(main_conversation_id, result)
@@ -372,85 +406,66 @@ class WorkspaceLockManager:
                         task_id=task_id, role_name=role.name, mandate=prompt_text, output=result.output,
                         messages=result.new_messages(), discovery_tokens=result.usage.total_tokens or 0,
                     )
-                _ = await self._ticket_store.update_ticket_status(
+                done_row = await self._ticket_store.update_ticket_status(
                     main_conversation_id, task_id, status=verdict.status, run_id=result.run_id, result_summary=result.output
                 )
-                blocked_downstream = not verdict.succeeded
-                status_persisted = True
-                if verdict.succeeded:
-                    pending_event = (f"@{task_id} (@{role.name}) 已完成:\n{result.output}", "completed")
-                else:
-                    pending_event = (
-                        f"@{task_id} (@{role.name}) 未达成完成条件 [{verdict.reason_code}]（下游保持阻塞）:\n{result.output}",
-                        "failed",
-                    )
-        except asyncio.CancelledError:
-            _ = await self._ticket_store.update_ticket_status(main_conversation_id, task_id, status="cancelled")
+                self._bridge.emit_worker_outcome(
+                    row=done_row, run_id=worker_run_id, outcome="completed", output_text=result.output
+                )
+                blocked_downstream, status_persisted = not verdict.succeeded, True
+                pending_event = (
+                    (f"@{task_id} (@{role.name}) 已完成:\n{result.output}", "completed")
+                    if verdict.succeeded
+                    else (f"@{task_id} (@{role.name}) 未达成完成条件 [{verdict.reason_code}]（下游保持阻塞）:\n{result.output}", "failed")
+                )
+        except (asyncio.CancelledError, RunCancelled) as exc:
+            c_row = await self._ticket_store.update_ticket_status(main_conversation_id, task_id, status="cancelled")
             await self._ticket_store.remove_dependency(main_conversation_id, task_id)
-            blocked_downstream = False
-            status_persisted = True
+            self._bridge.emit_worker_outcome(row=c_row, run_id=worker_run_id, outcome="cancelled")
+            blocked_downstream, status_persisted = False, True
             pending_event = (f"@{task_id} (@{role.name}) 已取消。", "cancelled")
-            raise
+            if isinstance(exc, asyncio.CancelledError):
+                raise
         except (AgentRunError, ModelAPIError, UsageLimitExceeded, TimeoutError) as exc:
             err_msg = format_worker_error(exc)
-            logfire.error(
-                "Role worker failed",
-                main_conversation_id=main_conversation_id,
-                task_id=task_id,
-                role_name=role.name,
-                error=err_msg,
-            )
-            _ = await self._ticket_store.update_ticket_status(
-                main_conversation_id, task_id, status="failed", result_summary=err_msg
+            logfire.error("Role worker failed", main_conversation_id=main_conversation_id, task_id=task_id, role_name=role.name, error=err_msg)
+            f_row = await self._ticket_store.update_ticket_status(main_conversation_id, task_id, status="failed", result_summary=err_msg)
+            self._bridge.emit_worker_outcome(
+                row=f_row, run_id=worker_run_id, outcome="failed", error_code=type(exc).__name__, error_message=err_msg
             )
             status_persisted = True
-            pending_event = (
-                f"@{task_id} (@{role.name}) 执行失败（需人工 Revise 重试或取消上游）: {err_msg}",
-                "failed",
-            )
+            pending_event = (f"@{task_id} (@{role.name}) 执行失败（需人工 Revise 重试或取消上游）: {err_msg}", "failed")
         finally:
             if perm_hook is not None:
                 perm_hook.release_runs()
             if not status_persisted:
-                _ = await self._ticket_store.update_ticket_status(
-                    main_conversation_id,
-                    task_id,
-                    status="failed",
-                    result_summary="Worker terminated unexpectedly.",
+                u_row = await self._ticket_store.update_ticket_status(
+                    main_conversation_id, task_id, status="failed", result_summary="Worker terminated unexpectedly."
                 )
+                self._bridge.emit_status_changed(u_row)
                 pending_event = (f"@{task_id} (@{role.name}) 意外终止并已标记为 failed。", "failed")
             otel_context.detach(otel_token)
             _ = self._tasks.pop(key, None)
+            _ = self._cancel_tokens.pop(key, None)
             _ = self._steer_queues.pop(key, None)
             await self._release_and_schedule_next(
-                main_conversation_id=main_conversation_id,
-                task_id=task_id,
-                work_path=ticket.work_path,
-                blocked_downstream=blocked_downstream,
-                cancelled=not blocked_downstream and not status_persisted,
+                main_conversation_id=main_conversation_id, task_id=task_id, work_path=ticket.work_path,
+                blocked_downstream=blocked_downstream, cancelled=not blocked_downstream and not status_persisted,
                 completion_event=pending_event,
             )
 
     async def _release_and_schedule_next(
-        self,
-        *,
-        main_conversation_id: str,
-        task_id: str,
-        work_path: str | None,
-        blocked_downstream: bool,
-        cancelled: bool = False,
-        completion_event: tuple[str, str] | None = None,
+        self, *, main_conversation_id: str, task_id: str, work_path: str | None,
+        blocked_downstream: bool, cancelled: bool = False, completion_event: tuple[str, str] | None = None,
     ) -> None:
         started: list[QueuedTask] = []
         async with self._dispatch_lock:
             self._state.mark_settled(main_conversation_id, task_id, blocked=blocked_downstream)
             if not blocked_downstream or cancelled:
                 self._state.remove_dependency(main_conversation_id, task_id)
-            self._state.release_lock(
-                main_conversation_id=main_conversation_id, task_id=task_id, norm_path=work_path
-            )
+            self._state.release_lock(main_conversation_id=main_conversation_id, task_id=task_id, norm_path=work_path)
             started = await self._start_ready_tasks_locked()
-
+            self._bridge.emit_locks_changed()
         if completion_event is not None:
             await self._emit(main_conversation_id, completion_event[0], completion_event[1])
         await self._emit_started(started)
@@ -458,19 +473,13 @@ class WorkspaceLockManager:
     async def _start_ready_tasks_locked(self) -> list[QueuedTask]:
         started = self._state.pop_ready_tasks()
         for item in started:
-            _ = await self._ticket_store.update_ticket_status(
-                item.main_conversation_id, item.task_id, status="running"
-            )
+            _ = await self._ticket_store.update_ticket_status(item.main_conversation_id, item.task_id, status="running")
             self._spawn_worker(item.main_conversation_id, item.task_id)
         return started
 
     async def _emit_started(self, started: Sequence[QueuedTask]) -> None:
         for item in started:
-            await self._emit(
-                item.main_conversation_id,
-                f"排队中的 @{item.task_id} 已获取工作区锁({item.lock_mode})并开始执行。",
-                "started",
-            )
+            await self._emit(item.main_conversation_id, f"排队中的 @{item.task_id} 已获取工作区锁({item.lock_mode})并开始执行。", "started")
 
     async def _emit(self, main_conversation_id: str, summary: str, kind: str) -> None:
         if self._on_event is None:
@@ -478,12 +487,7 @@ class WorkspaceLockManager:
         try:
             _ = await self._on_event(main_conversation_id, summary, kind)
         except (AgentRunError, ModelAPIError, UsageLimitExceeded, TimeoutError, RuntimeError, OSError) as exc:
-            logfire.error(
-                "Event callback failed (isolated from scheduler loop)",
-                main_conversation_id=main_conversation_id,
-                kind=kind,
-                error=format_worker_error(exc),
-            )
+            logfire.error("Event callback failed (isolated from scheduler loop)", main_conversation_id=main_conversation_id, kind=kind, error=format_worker_error(exc))
 
     async def wait_all(self) -> None:
         """等待当前所有后台 Worker 协程结算（含连续出队的排队任务）。"""

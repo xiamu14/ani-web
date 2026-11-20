@@ -210,15 +210,31 @@ class CooldownRetryModel(WrapperModel):
         model_request_parameters: ModelRequestParameters,
         run_context: RunContext[Any] | None = None,  # pyright: ignore[reportExplicitAny]
     ) -> AsyncGenerator[StreamedResponse]:
-        await self._gate.wait_if_cooling_down()
-        self._stats.on_enter()
-        try:
-            async with self.wrapped.request_stream(
-                messages, model_settings, model_request_parameters, run_context
-            ) as stream:
-                yield stream
-        finally:
-            self._stats.on_exit()
+        attempt = 0
+        while True:
+            await self._gate.wait_if_cooling_down()
+            self._stats.on_enter()
+            entered_stream = False
+            try:
+                async with self.wrapped.request_stream(
+                    messages, model_settings, model_request_parameters, run_context
+                ) as stream:
+                    entered_stream = True
+                    yield stream
+                    return
+            except (ModelHTTPError, ModelAPIError) as exc:
+                # 仅在进入流并向调用方吐出首包前对 429 执行退避重试；首包之后禁止重试
+                if (
+                    entered_stream
+                    or not is_rate_limit_error(exc)
+                    or attempt >= self._max_retries
+                ):
+                    raise
+                self._stats.rate_limit_retries += 1
+                _ = self._gate.notify_rate_limited(attempt)
+                attempt += 1
+            finally:
+                self._stats.on_exit()
 
 
 def _unwrap_raw_model(model: Model | KnownModelName | str) -> Model:

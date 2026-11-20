@@ -140,6 +140,12 @@ from agent.protocol.schema_export import (
     build_events_json_schema,
     write_events_schema_file,
 )
+from agent.protocol.stream_bridge import (
+    make_event_stream_handler,
+    to_run_usage_view,
+    verify_citations_for_protocol,
+)
+from agent.protocol.task_tracker import TaskLiveState, TaskProtocolBridge
 
 __all__ = [
     "PROTOCOL_EVENT_ADAPTER",
@@ -241,8 +247,10 @@ __all__ = [
     "TaskCreatedEvent",
     "TaskCreatedPayload",
     "TaskLivePhaseLiteral",
+    "TaskLiveState",
     "TaskProgressEvent",
     "TaskProgressPayload",
+    "TaskProtocolBridge",
     "TaskStatusChangedEvent",
     "TaskStatusChangedPayload",
     "TaskStatusLiteral",
@@ -270,6 +278,9 @@ __all__ = [
     "WorkspaceLocksChangedEvent",
     "WorkspaceLocksChangedPayload",
     "build_events_json_schema",
+    "make_event_stream_handler",
+    "to_run_usage_view",
     "utc_rfc3339",
+    "verify_citations_for_protocol",
     "write_events_schema_file",
 ]

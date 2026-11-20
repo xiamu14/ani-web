@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import replace
-from typing import Protocol
+from typing import Protocol, override
 
 from pydantic_ai import RunContext
 from pydantic_ai.capabilities import AbstractCapability
@@ -48,4 +48,37 @@ class RouterContextHook(AbstractCapability[RouterDeps]):
                 request_context,
                 messages=[*request_context.messages[:-1], ws_msg, request_context.messages[-1]],
             )
+        return request_context
+
+
+class RouterSteerHook(AbstractCapability[RouterDeps]):
+    """在 Router 运行中每次模型请求前实时注入用户追加建议（Interjection）。"""
+
+    def __init__(
+        self,
+        steer_queues: dict[str, deque[str]],
+        *,
+        max_injections: int = 10,
+    ) -> None:
+        self._steer_queues: dict[str, deque[str]] = steer_queues
+        self._max_injections: int = max(0, max_injections)
+        self._injected_counts: dict[str, int] = {}
+
+    @override
+    async def before_model_request(
+        self, ctx: RunContext[RouterDeps], request_context: ModelRequestContext
+    ) -> ModelRequestContext:
+        cid = ctx.deps.main_conversation_id
+        queue = self._steer_queues.get(cid)
+        if not queue:
+            return request_context
+        count = self._injected_counts.get(cid, 0)
+        while queue and count < self._max_injections:
+            instruction = queue.popleft()
+            count += 1
+            _ = ctx.enqueue(
+                f"<user_interjection>\n{instruction}\n</user_interjection>",
+                priority="asap",
+            )
+        self._injected_counts[cid] = count
         return request_context

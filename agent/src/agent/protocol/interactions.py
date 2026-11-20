@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal, cast
 from uuid import uuid4
@@ -18,6 +18,7 @@ from pydantic_ai_harness.ask_user import (
     AskUserAnswer,
     AskUserRequest,
     AskUserResponse,
+    ContextAnswerer,
     check_response,
 )
 
@@ -270,7 +271,7 @@ class InteractionBroker:
         conversation_id: str,
         task_id: str | None = None,
         role_name: str | None = None,
-    ) -> Callable[[RunContext[object], AskUserRequest], Awaitable[AskUserResponse]]:
+    ) -> ContextAnswerer[object]:
         """生成可直接注入 pydantic_ai_harness.ask_user.AskUser 的 ContextAnswerer。"""
 
         async def _answerer(

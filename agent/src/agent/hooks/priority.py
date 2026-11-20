@@ -19,6 +19,7 @@ class HookPriority(IntEnum):
     TOOL_QUEUE = 20
     OBSERVABILITY = 30
     DEFAULT = DEFAULT_HOOK_PRIORITY
+    ACCOUNTING = 85
     PERSISTENCE = 90
 
 
