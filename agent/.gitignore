@@ -20,3 +20,6 @@ __pycache__/
 *.db-shm
 .tmp
 logs/
+
+# Local E2E test sample files
+tests/files/

@@ -1,5 +1,5 @@
 """真实端到端测试（E2E）：
-1. 使用 docs/001.jpg、docs/002.webp、docs/003.pdf 三个真实文件，通过 AttachmentRegistry + open_runtime + 真实 LLM 执行附件引用提交、OCR 识别、OPT-3 外置压缩验证与 [[cite:...]] 溯源核验。
+1. 使用 tests/files/001.jpg、tests/files/002.webp、tests/files/003.pdf 三个真实文件，通过 AttachmentRegistry + open_runtime + 真实 LLM 执行附件引用提交、OCR 识别、OPT-3 外置压缩验证与 [[cite:...]] 溯源核验。
 2. 使用 .env 中的 MONID_API_KEY 调用 Monid API (provider="openai", endpoint="/v1/image/gpt-image-2") 生成图像，注册为全局附件与内部 Artifact，再由独立 Role Agent 仅凭轻量引用句柄按需加载图像并完成视觉分析与溯源核验。
 """
 
@@ -254,9 +254,9 @@ async def main() -> None:
     )
 
     sample_files = [
-        (repo_root / "docs" / "001.jpg", "image/jpeg"),
-        (repo_root / "docs" / "002.webp", "image/webp"),
-        (repo_root / "docs" / "003.pdf", "application/pdf"),
+        (repo_root / "tests" / "files" / "001.jpg", "image/jpeg"),
+        (repo_root / "tests" / "files" / "002.webp", "image/webp"),
+        (repo_root / "tests" / "files" / "003.pdf", "application/pdf"),
     ]
     for path, _ in sample_files:
         if not path.is_file():
@@ -278,7 +278,7 @@ async def main() -> None:
             # Part A: 3 个真实文件附件提交 + OCR 识别 + OPT-3 存储验证 + 溯源核验
             # ------------------------------------------------------------------
             print("\n" + "=" * 72)
-            print("PART A: 真实附件提交与 OCR E2E (docs/001.jpg, docs/002.webp, docs/003.pdf)")
+            print("PART A: 真实附件提交与 OCR E2E (tests/files/001.jpg, tests/files/002.webp, tests/files/003.pdf)")
             print("=" * 72)
 
             total_raw_bytes = 0
