@@ -98,3 +98,64 @@ class McpToolPolicyRow(SQLModel, table=True):
     recommended_roles_json: str = Field(default="[]")
     reason: str = Field(default="")
     updated_at: str
+
+
+class ObservationRow(SQLModel, table=True):
+    """原子记忆观察表（observations）ORM 模型。"""
+
+    __tablename__: ClassVar[str] = "observations"  # pyright: ignore[reportIncompatibleVariableOverride]
+
+    id: int | None = Field(default=None, primary_key=True)
+    project_key: str = Field(index=True)
+    conversation_id: str
+    role_name: str
+    type: str
+    title: str
+    subtitle: str = Field(default="")
+    facts_json: str = Field(default="[]")
+    narrative: str = Field(default="")
+    concepts_json: str = Field(default="[]")
+    files_read_json: str = Field(default="[]")
+    files_modified_json: str = Field(default="[]")
+    line_anchors_json: str = Field(default="[]")
+    file_hashes_json: str = Field(default="{}")
+    provenance: str = Field(default="verified_by_tool")
+    discovery_tokens: int = Field(default=0)
+    reinforcement_dates_json: str = Field(default="[]")
+    superseded_by: int | None = Field(default=None, foreign_key="observations.id")
+    created_at_epoch: int
+
+
+class SessionSummaryRow(SQLModel, table=True):
+    """会话/Role 任务阶段总结表（session_summaries）ORM 模型。"""
+
+    __tablename__: ClassVar[str] = "session_summaries"  # pyright: ignore[reportIncompatibleVariableOverride]
+
+    id: int | None = Field(default=None, primary_key=True)
+    project_key: str = Field(index=True)
+    conversation_id: str
+    task_id: str = Field(default="")
+    request: str = Field(default="")
+    investigated: str = Field(default="")
+    learned: str = Field(default="")
+    completed: str = Field(default="")
+    next_steps: str = Field(default="")
+    notes: str = Field(default="")
+    files_read_json: str = Field(default="[]")
+    files_edited_json: str = Field(default="[]")
+    discovery_tokens: int = Field(default=0)
+    created_at_epoch: int
+
+
+class WorkStateRow(SQLModel, table=True):
+    """开放工作状态账本表（work_states）ORM 模型。"""
+
+    __tablename__: ClassVar[str] = "work_states"  # pyright: ignore[reportIncompatibleVariableOverride]
+
+    id: int | None = Field(default=None, primary_key=True)
+    project_key: str = Field(index=True)
+    list_name: str
+    task_name: str
+    fields_json: str = Field(default="{}")
+    status: str = Field(default="open")
+    created_at_epoch: int

@@ -117,6 +117,98 @@ CREATE TABLE IF NOT EXISTS mcp_tool_policies (
 
 CREATE INDEX IF NOT EXISTS idx_mcp_tool_policies_prefixed
     ON mcp_tool_policies(prefixed_tool_name);
+
+CREATE TABLE IF NOT EXISTS observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_key TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    role_name TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('decision', 'bugfix', 'feature', 'refactor', 'discovery', 'change')),
+    title TEXT NOT NULL,
+    subtitle TEXT NOT NULL DEFAULT '',
+    facts_json TEXT NOT NULL DEFAULT '[]',
+    narrative TEXT NOT NULL DEFAULT '',
+    concepts_json TEXT NOT NULL DEFAULT '[]',
+    files_read_json TEXT NOT NULL DEFAULT '[]',
+    files_modified_json TEXT NOT NULL DEFAULT '[]',
+    line_anchors_json TEXT NOT NULL DEFAULT '[]',
+    file_hashes_json TEXT NOT NULL DEFAULT '{}',
+    provenance TEXT NOT NULL DEFAULT 'verified_by_tool'
+        CHECK (provenance IN ('verified_by_tool', 'user_explicit', 'agent_inferred')),
+    discovery_tokens INTEGER NOT NULL DEFAULT 0,
+    reinforcement_dates_json TEXT NOT NULL DEFAULT '[]',
+    superseded_by INTEGER REFERENCES observations(id),
+    created_at_epoch INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_observations_project_epoch
+    ON observations(project_key, created_at_epoch DESC, id DESC);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(
+    title,
+    subtitle,
+    facts_json,
+    narrative,
+    concepts_json,
+    files_read_json,
+    files_modified_json,
+    tokenize='unicode61'
+);
+
+CREATE TRIGGER IF NOT EXISTS trg_observations_ai AFTER INSERT ON observations BEGIN
+    INSERT INTO observations_fts(
+        rowid, title, subtitle, facts_json, narrative, concepts_json, files_read_json, files_modified_json
+    ) VALUES (
+        new.id, new.title, new.subtitle, new.facts_json, new.narrative, new.concepts_json, new.files_read_json, new.files_modified_json
+    );
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_observations_ad AFTER DELETE ON observations BEGIN
+    DELETE FROM observations_fts WHERE rowid = old.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_observations_au AFTER UPDATE ON observations BEGIN
+    DELETE FROM observations_fts WHERE rowid = old.id;
+    INSERT INTO observations_fts(
+        rowid, title, subtitle, facts_json, narrative, concepts_json, files_read_json, files_modified_json
+    ) VALUES (
+        new.id, new.title, new.subtitle, new.facts_json, new.narrative, new.concepts_json, new.files_read_json, new.files_modified_json
+    );
+END;
+
+CREATE TABLE IF NOT EXISTS session_summaries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_key TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    task_id TEXT NOT NULL DEFAULT '',
+    request TEXT NOT NULL DEFAULT '',
+    investigated TEXT NOT NULL DEFAULT '',
+    learned TEXT NOT NULL DEFAULT '',
+    completed TEXT NOT NULL DEFAULT '',
+    next_steps TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    files_read_json TEXT NOT NULL DEFAULT '[]',
+    files_edited_json TEXT NOT NULL DEFAULT '[]',
+    discovery_tokens INTEGER NOT NULL DEFAULT 0,
+    created_at_epoch INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_summaries_project_epoch
+    ON session_summaries(project_key, created_at_epoch DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS work_states (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_key TEXT NOT NULL,
+    list_name TEXT NOT NULL,
+    task_name TEXT NOT NULL,
+    fields_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'open'
+        CHECK (status IN ('open', 'in_progress', 'blocked', 'done', 'cancelled')),
+    created_at_epoch INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_work_states_project_epoch
+    ON work_states(project_key, created_at_epoch ASC, id ASC);
 """
 
 
