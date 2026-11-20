@@ -16,6 +16,7 @@ from pydantic_ai.exceptions import AgentRunError, ModelAPIError, UsageLimitExcee
 from pydantic_ai.workspaces import LocalWorkspaceBackend
 from pydantic_ai_harness.step_persistence import StepStore
 
+from agent.attachments import AttachmentRegistry
 from agent.core.lock_queue import (
     LockQueueState,
     QueuedTask,
@@ -75,6 +76,7 @@ class WorkspaceLockManager:
         mcp_http_client: AsyncHTTPClient | None = None,
         memory_store: MemoryStorePort | None = None,
         llm_controller: LlmConcurrencyController | None = None,
+        attachment_registry: AttachmentRegistry | None = None,
     ) -> None:
         self._roles: RoleRegistry = roles
         self._sessions: RoleSessionManager = sessions
@@ -92,6 +94,7 @@ class WorkspaceLockManager:
         self._mcp_http_client: AsyncHTTPClient | None = mcp_http_client
         self._memory_store: MemoryStorePort | None = memory_store
         self._llm_controller: LlmConcurrencyController | None = llm_controller
+        self._attachment_registry: AttachmentRegistry | None = attachment_registry
         self._state: LockQueueState = LockQueueState()
         self._tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
         self._steer_queues: dict[tuple[str, str], deque[str]] = {}
@@ -280,11 +283,8 @@ class WorkspaceLockManager:
         rows = await self._ticket_store.list_tickets(main_conversation_id)
         return [
             TaskSummary(
-                task_id=r.task_id,
-                role_name=r.role_name,
-                status=r.status,
-                work_path=r.work_path,
-                mandate=r.mandate,
+                task_id=r.task_id, role_name=r.role_name, status=r.status,
+                work_path=r.work_path, mandate=r.mandate,
             )
             for r in rows
         ]
@@ -312,22 +312,18 @@ class WorkspaceLockManager:
 
         try:
             with logfire.span(
-                "role_worker {task_id} ({role_name})",
-                main_conversation_id=main_conversation_id,
-                task_id=task_id,
-                role_name=role.name,
-                work_path=ticket.work_path,
+                "role_worker {task_id} ({role_name})", main_conversation_id=main_conversation_id,
+                task_id=task_id, role_name=role.name, work_path=ticket.work_path,
             ):
                 _ = await self._ticket_store.update_ticket_status(main_conversation_id, task_id, status="running")
                 role_conv = await self._sessions.load_task_conversation(
-                    main_conversation_id=main_conversation_id,
-                    task_id=task_id,
-                    role_name=role.name,
-                    role_instructions=role.instructions,
+                    main_conversation_id=main_conversation_id, task_id=task_id,
+                    role_name=role.name, role_instructions=role.instructions,
                 )
                 mem_bundle = await prepare_role_memory_bundle(
                     self._memory_store, work_path=ticket.work_path,
-                    conversation_id=role_conv.conversation_id, role_name=role.name, branch_mode="root_only",
+                    conversation_id=role_conv.conversation_id, role_name=role.name,
+                    branch_mode="root_only", attachment_registry=self._attachment_registry,
                 )
                 policy = role.effective_budget_policy()
                 trace = ToolExecutionTrace()

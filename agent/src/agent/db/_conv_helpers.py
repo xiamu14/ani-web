@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 from pydantic import TypeAdapter
@@ -10,14 +11,22 @@ from pydantic_ai.conversation_store import ConversationRecord
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 from pydantic_ai.usage import RunUsage
 from pydantic_ai_harness._history import STORED_HISTORY_CONTEXT
+from pydantic_ai_harness.media._store import MediaStore
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agent.db.media_store import (
+    DEFAULT_MEDIA_THRESHOLD_BYTES,
+    externalize_message_tree,
+    replace_external_markers_with_stubs,
+    restore_message_tree,
+)
 from agent.db.models import ConversationRow
 
 USAGE_ADAPTER = TypeAdapter(RunUsage)
 DEFERRED_ADAPTER = TypeAdapter(DeferredToolRequests)
 BRANCHES_ADAPTER = TypeAdapter(list[str])
+_EXTERNAL_MARKER_SUBSTR = "__harness_external_media__"
 
 
 def utc_iso(dt: datetime | None = None) -> str:
@@ -28,8 +37,53 @@ def dump_message(message: ModelMessage) -> str:
     return ModelMessagesTypeAdapter.dump_json([message]).decode("utf-8")
 
 
+async def dump_message_async(
+    message: ModelMessage,
+    *,
+    media_store: MediaStore | None = None,
+    threshold_bytes: int = DEFAULT_MEDIA_THRESHOLD_BYTES,
+) -> str:
+    """序列化单条 ModelMessage；当挂载了 media_store 且字节长度达到阈值时自动外置大二进制与大文本（OPT-3/4）。"""
+    raw_json = ModelMessagesTypeAdapter.dump_json([message]).decode("utf-8")
+    if media_store is None or len(raw_json.encode("utf-8")) < threshold_bytes:
+        return raw_json
+    tree: object = json.loads(raw_json)  # pyright: ignore[reportAny]
+    ext_tree = await externalize_message_tree(
+        tree,
+        media_store=media_store,
+        threshold_bytes=threshold_bytes,
+    )
+    return json.dumps(ext_tree, ensure_ascii=False)
+
+
 def load_message(raw: str) -> ModelMessage:
+    if _EXTERNAL_MARKER_SUBSTR in raw:
+        tree: object = json.loads(raw)  # pyright: ignore[reportAny]
+        stubbed = replace_external_markers_with_stubs(tree)
+        return ModelMessagesTypeAdapter.validate_python(
+            stubbed, context=STORED_HISTORY_CONTEXT
+        )[0]
     return ModelMessagesTypeAdapter.validate_json(raw, context=STORED_HISTORY_CONTEXT)[0]
+
+
+async def load_message_async(
+    raw: str,
+    *,
+    media_store: MediaStore | None = None,
+    hydrate_media: bool = True,
+) -> ModelMessage:
+    """反序列化单条 ModelMessage；当含外置 marker 时按 hydrate_media 决定完整还原或降级为紧凑占位符（OPT-6）。"""
+    if _EXTERNAL_MARKER_SUBSTR not in raw:
+        return ModelMessagesTypeAdapter.validate_json(raw, context=STORED_HISTORY_CONTEXT)[0]
+    tree: object = json.loads(raw)  # pyright: ignore[reportAny]
+    restored = await restore_message_tree(
+        tree,
+        media_store=media_store,
+        hydrate_media=hydrate_media,
+    )
+    return ModelMessagesTypeAdapter.validate_python(
+        restored, context=STORED_HISTORY_CONTEXT
+    )[0]
 
 
 def row_to_record(row: ConversationRow) -> ConversationRecord:

@@ -14,6 +14,7 @@ from pydantic_ai.conversation_store import (
     ConversationStore,
 )
 from pydantic_ai.messages import ModelMessage
+from pydantic_ai_harness.media._store import MediaStore
 from sqlalchemy import delete, text, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
@@ -33,13 +34,13 @@ from agent.db._conv_helpers import (
     derive_parent_conv_id as _derive_parent_conv_id,
 )
 from agent.db._conv_helpers import (
-    dump_message as _dump_message,
+    dump_message_async as _dump_message_async,
 )
 from agent.db._conv_helpers import (
     gc_unreachable_entries,
 )
 from agent.db._conv_helpers import (
-    load_message as _load_message,
+    load_message_async as _load_message_async,
 )
 from agent.db._conv_helpers import (
     row_to_record as _row_to_record,
@@ -48,6 +49,10 @@ from agent.db._conv_helpers import (
     utc_iso as _utc_iso,
 )
 from agent.db.engine import create_session_factory
+from agent.db.media_store import (
+    DEFAULT_MEDIA_THRESHOLD_BYTES,
+    DEFAULT_MEDIA_WINDOW_MESSAGES,
+)
 from agent.db.models import AppStateRow, ContextEntryRow, ConversationRow
 
 DEFAULT_TREE_ID = "default"
@@ -56,7 +61,7 @@ LAST_ACTIVE_CONV_KEY = "last_active_conversation_id"
 
 
 class SQLModelConversationStore(ConversationStore):
-    """基于 SQLModel + aiosqlite 的异步父指针链 ConversationStore。"""
+    """基于 SQLModel + aiosqlite 的异步父指针链 ConversationStore（支持 OPT-3/4 外置与 OPT-6 窗口还原）。"""
 
     def __init__(
         self,
@@ -64,12 +69,22 @@ class SQLModelConversationStore(ConversationStore):
         *,
         tree_id: str = DEFAULT_TREE_ID,
         session_factory: async_sessionmaker[AsyncSession] | None = None,
+        media_store: MediaStore | None = None,
+        media_threshold_bytes: int = DEFAULT_MEDIA_THRESHOLD_BYTES,
+        media_window: int | None = DEFAULT_MEDIA_WINDOW_MESSAGES,
     ) -> None:
         self._engine: AsyncEngine = engine
         self._tree_id: str = tree_id
         self._sessions: async_sessionmaker[AsyncSession] = (
             session_factory or create_session_factory(engine)
         )
+        self._media_store: MediaStore | None = media_store
+        self._media_threshold_bytes: int = media_threshold_bytes
+        self._media_window: int | None = media_window
+
+    @property
+    def media_store(self) -> MediaStore | None:
+        return self._media_store
 
     async def read_record(self, conversation_id: str) -> ConversationRecord | None:
         async with self._sessions() as session:
@@ -114,6 +129,11 @@ class SQLModelConversationStore(ConversationStore):
                     raise ConversationConflict(record.conversation_id)
 
             for entry in new_entries:
+                dumped_msg = await _dump_message_async(
+                    entry.message,
+                    media_store=self._media_store,
+                    threshold_bytes=self._media_threshold_bytes,
+                )
                 session.add(
                     ContextEntryRow(
                         id=entry.id,
@@ -121,7 +141,7 @@ class SQLModelConversationStore(ConversationStore):
                         parent_id=entry.parent_id,
                         kind=entry.kind,
                         stop_backtrack=0,
-                        message_json=_dump_message(entry.message),
+                        message_json=dumped_msg,
                         created_at=_utc_iso(),
                     )
                 )
@@ -186,20 +206,30 @@ class SQLModelConversationStore(ConversationStore):
             row = await session.get(ContextEntryRow, entry_id)
             if row is None or row.message_json is None:
                 raise LookupError(f"Entry {entry_id!r} not found.")
+            msg = await _load_message_async(
+                row.message_json,
+                media_store=self._media_store,
+                hydrate_media=True,
+            )
             return ConversationEntry(
                 id=row.id,
                 parent_id=row.parent_id,
-                message=_load_message(row.message_json),
+                message=msg,
             )
 
     async def read_history(
-        self, head_id: str | None, *, limit: int | None = None
+        self,
+        head_id: str | None,
+        *,
+        limit: int | None = None,
+        media_window: int | None = None,
     ) -> list[ConversationEntry]:
-        """使用递归 CTE 一次性从 head_id 回溯到根/截断节点，返回正序消息列表。"""
+        """使用递归 CTE 一次性从 head_id 回溯到根/截断节点，SQL 下推 LIMIT 并按 media_window 还原最近 K 条大附件（OPT-6）。"""
         if head_id is None:
             return []
 
-        sql = text("""
+        limit_clause = "LIMIT :limit" if limit is not None else ""
+        sql = text(f"""
             WITH RECURSIVE branch_chain AS (
                 SELECT id, parent_id, kind, stop_backtrack, message_json, 0 AS depth
                 FROM context_entries
@@ -214,27 +244,37 @@ class SQLModelConversationStore(ConversationStore):
             )
             SELECT id, parent_id, kind, message_json, depth
             FROM branch_chain
+            WHERE message_json IS NOT NULL
             ORDER BY depth ASC
+            {limit_clause}
         """)
+        params: dict[str, object] = {"head_id": head_id}
+        if limit is not None:
+            params["limit"] = max(0, limit)
         async with self._sessions() as session:
-            rows = (await session.execute(sql, {"head_id": head_id})).mappings().all()
+            rows = (await session.execute(sql, params)).mappings().all()
+            if not rows:
+                if await session.get(ContextEntryRow, head_id) is None:
+                    raise LookupError(f"Entry {head_id!r} not found.")
+                return []
 
-        if not rows:
-            raise LookupError(f"Entry {head_id!r} not found.")
-
+        effective_window = self._media_window if media_window is None else media_window
         entries: list[ConversationEntry] = []
         for row in rows:
-            if row["message_json"] is None:
+            raw_msg = row["message_json"]
+            if raw_msg is None:
                 continue
+            should_hydrate = effective_window is None or len(entries) < effective_window
+            msg = await _load_message_async(
+                str(raw_msg), media_store=self._media_store, hydrate_media=should_hydrate
+            )
             entries.append(
                 ConversationEntry(
-                    id=row["id"],
-                    parent_id=row["parent_id"],
-                    message=_load_message(row["message_json"]),
+                    id=str(row["id"]),
+                    parent_id=str(row["parent_id"]) if row["parent_id"] is not None else None,
+                    message=msg,
                 )
             )
-            if limit is not None and len(entries) >= limit:
-                break
 
         entries.reverse()
         return entries
@@ -380,6 +420,11 @@ class SQLModelConversationStore(ConversationStore):
         now = datetime.now(UTC)
         now_iso = _utc_iso(now)
 
+        dumped_handoff = await _dump_message_async(
+            handoff_message,
+            media_store=self._media_store,
+            threshold_bytes=self._media_threshold_bytes,
+        )
         async with self._sessions() as session, session.begin():
             session.add(
                 ContextEntryRow(
@@ -388,7 +433,7 @@ class SQLModelConversationStore(ConversationStore):
                     parent_id=parent_rec.head_id,
                     kind="handoff",
                     stop_backtrack=1,
-                    message_json=_dump_message(handoff_message),
+                    message_json=dumped_handoff,
                     created_at=now_iso,
                 )
             )

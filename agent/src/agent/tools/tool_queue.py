@@ -45,9 +45,15 @@ _NO_LOCK_TOOLS: frozenset[str] = frozenset(
         "memory_search",
         "memory_timeline",
         "get_observations",
+        "inspect_attachment",
+        "list_attachments",
+        "get_artifact",
+        "verify_citations",
     }
 )
-_MEMORY_WRITE_TOOLS: frozenset[str] = frozenset({"save_memory"})
+_MEMORY_WRITE_TOOLS: frozenset[str] = frozenset(
+    {"save_memory", "register_attachment", "save_artifact"}
+)
 _NO_LOCK_TOOL_KINDS: frozenset[str] = frozenset({"capability-load", "tool-search"})
 _CONV_EXCLUSIVE_TOOLS: frozenset[str] = frozenset({"set_workspace", "dispatch_role_agent"})
 _TICKET_EXCLUSIVE_TOOLS: frozenset[str] = frozenset({"steer_or_revise_task", "cancel_task"})

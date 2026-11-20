@@ -11,6 +11,7 @@ from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.toolsets import AbstractToolset
 
+from agent.attachments import AttachmentRegistry, build_attachment_toolset
 from agent.memory.budget import render_l0_l1_context
 from agent.memory.extractor import TrajectoryMemoryExtractor
 from agent.memory.ports import MemoryStorePort
@@ -97,10 +98,16 @@ async def prepare_role_memory_bundle(
     conversation_id: str,
     role_name: str,
     branch_mode: str = "root_only",
+    attachment_registry: AttachmentRegistry | None = None,
 ) -> RoleMemoryBundle:
-    """为 Role Worker 构建 L0+L1 指令块、L2 FileMemoryContextHook 与 L3 MemoryToolset。"""
+    """为 Role Worker 构建 L0+L1 指令块、L2 FileMemoryContextHook、L3 MemoryToolset 与 AttachmentToolset。"""
+    extra_toolsets: list[AbstractToolset[object]] = []
+    if attachment_registry is not None:
+        extra_toolsets.append(
+            build_attachment_toolset(attachment_registry, workspace_root=work_path)
+        )
     if store is None:
-        return RoleMemoryBundle()
+        return RoleMemoryBundle(toolsets=tuple(extra_toolsets))
     from agent.hooks.memory_hook import FileMemoryContextHook
 
     project_key = derive_project_key(work_path)
@@ -116,7 +123,7 @@ async def prepare_role_memory_bundle(
         conversation_id=conversation_id,
         role_name=role_name,
     )
-    toolset = build_memory_toolset(
+    mem_toolset = build_memory_toolset(
         store,
         project_key=project_key,
         workspace_root=work_path,
@@ -126,7 +133,7 @@ async def prepare_role_memory_bundle(
     return RoleMemoryBundle(
         extra_instructions=l0_l1,
         capabilities=(file_hook,),
-        toolsets=(toolset,),
+        toolsets=(mem_toolset, *extra_toolsets),
     )
 
 

@@ -14,6 +14,7 @@ from pydantic_ai.messages import ModelMessage, ModelRequest
 from pydantic_ai_harness.step_persistence import SqliteStepStore
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from agent.attachments import AttachmentRegistry
 from agent.config import LlmSettings, load_settings
 from agent.context import ContextTreeManager, JevDecisionClient, SemanticBranchRouter
 from agent.core.model import build_model
@@ -26,6 +27,7 @@ from agent.core.router import RouterReply, SuperAgentRouter
 from agent.core.scheduler import WorkspaceLockManager
 from agent.db import (
     ROOT_ENTRY_KEY,
+    CompressedFileMediaStore,
     SQLModelConversationStore,
     SQLModelMcpPolicyStore,
     SQLModelMemoryStore,
@@ -143,6 +145,8 @@ class SuperAgentRuntime:
     permission_reviewer: PermissionReviewer
     tool_coordinator: ToolLockCoordinator
     llm_controller: LlmConcurrencyController
+    media_store: CompressedFileMediaStore
+    attachment_registry: AttachmentRegistry
     scheduler: WorkspaceLockManager
     router: SuperAgentRouter
     logfire_enabled: bool
@@ -209,20 +213,34 @@ async def open_runtime(
     elicitation_handler: McpElicitationHandler | None = None,
     mcp_http_client: AsyncHTTPClient | None = None,
     llm_controller: LlmConcurrencyController | None = None,
+    media_dir: str | Path | None = None,
+    attachment_registry: AttachmentRegistry | None = None,
 ) -> AsyncGenerator[SuperAgentRuntime]:
     """初始化双库、ContextTreeManager、Logfire 与 SuperAgentRouter。"""
     settings = load_settings()
     logfire_enabled = configure_observability(settings)
 
+    step_target = Path(step_db_path).expanduser().resolve() if step_db_path is not None else default_step_db_path()
+    step_target.parent.mkdir(parents=True, exist_ok=True)
+    effective_media_dir = (
+        Path(media_dir).expanduser().resolve()
+        if media_dir is not None
+        else step_target.parent / "media_blobs"
+    )
+    media_store = CompressedFileMediaStore(effective_media_dir)
+    effective_registry = (
+        attachment_registry
+        if attachment_registry is not None
+        else AttachmentRegistry(media_store=media_store)
+    )
+
     engine = create_sqlite_async_engine(db_path)
     await init_async_db(engine)
     sessions = create_session_factory(engine)
-    store = SQLModelConversationStore(engine, session_factory=sessions)
+    store = SQLModelConversationStore(engine, session_factory=sessions, media_store=media_store)
     ticket_store = SQLModelTicketStore(engine, session_factory=sessions)
     memory_store = SQLModelMemoryStore(engine, session_factory=sessions)
 
-    step_target = Path(step_db_path).expanduser().resolve() if step_db_path is not None else default_step_db_path()
-    step_target.parent.mkdir(parents=True, exist_ok=True)
     step_store = SqliteStepStore(database=step_target)
 
     tree = ContextTreeManager(store, step_store=step_store, memory_store=memory_store)
@@ -311,6 +329,7 @@ async def open_runtime(
         mcp_http_client=mcp_http_client,
         memory_store=memory_store,
         llm_controller=effective_llm_ctrl,
+        attachment_registry=effective_registry,
     )
 
     semantic_router = (
@@ -363,6 +382,8 @@ async def open_runtime(
             permission_reviewer=reviewer,
             tool_coordinator=coordinator,
             llm_controller=effective_llm_ctrl,
+            media_store=media_store,
+            attachment_registry=effective_registry,
             scheduler=scheduler,
             router=router,
             logfire_enabled=logfire_enabled,
