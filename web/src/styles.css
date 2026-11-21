@@ -1,0 +1,105 @@
+@layer ui-sdk {
+  :where([data-slot][hidden]:not([hidden="until-found"])) {
+    display: none !important;
+  }
+}
+
+@import "tailwindcss";
+@import "@xyflow/react/dist/style.css";
+
+@custom-variant dark {
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not(.light), :root:not(.light) *) {
+      @slot;
+    }
+  }
+  &:where(.dark, .dark *) {
+    @slot;
+  }
+}
+
+@theme {
+  --font-sans:
+    "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+  --font-mono:
+    "JetBrains Mono", "SF Mono", Menlo, Monaco, Consolas, ui-monospace,
+    monospace;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-rail: var(--rail);
+  --color-stage: var(--stage);
+  --color-surface: var(--surface);
+  --color-surface-subtle: var(--surface-subtle);
+  --color-surface-hover: var(--surface-hover);
+  --color-border: var(--border);
+  --color-border-subtle: var(--border-subtle);
+  --color-text: var(--text);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-fg: var(--accent-fg);
+}
+
+:root {
+  --bg: #f6f7f9;
+  --rail: #f1f3f6;
+  --stage: #ffffff;
+  --surface: #ffffff;
+  --surface-subtle: #f4f5f8;
+  --surface-hover: #eceff4;
+  --border: #e4e7ee;
+  --border-subtle: #edf0f5;
+  --text: #111827;
+  --text-secondary: #4b5563;
+  --text-muted: #6b7280;
+  --accent: #4f46e5;
+  --accent-soft: #eef2ff;
+  --accent-fg: #4338ca;
+  color-scheme: light dark;
+}
+
+@utility theme-dark {
+  --bg: #0b0d12;
+  --rail: #0f1218;
+  --stage: #12161f;
+  --surface: #171c28;
+  --surface-subtle: #1b2130;
+  --surface-hover: #22293b;
+  --border: #252c3d;
+  --border-subtle: #1d2332;
+  --text: #f3f4f6;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+  --accent: #6366f1;
+  --accent-soft: #1e1b4b;
+  --accent-fg: #a5b4fc;
+}
+
+@utility scrollbar-hide {
+  &::-webkit-scrollbar {
+    display: none;
+  }
+
+  @supports not selector(::-webkit-scrollbar) {
+    scrollbar-width: none;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    @apply theme-dark;
+  }
+}
+
+.dark {
+  color-scheme: dark;
+  @apply theme-dark;
+}
+
+:root.light {
+  color-scheme: light;
+}

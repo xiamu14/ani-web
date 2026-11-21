@@ -1,0 +1,40 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "extends": ["ultracite/biome/core", "ultracite/biome/react"],
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
+  "files": {
+    "includes": ["!!**/.tanstack", "!!**/routeTree.gen.ts"]
+  },
+  "overrides": [
+    {
+      "includes": ["src/routes/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "useFilenamingConvention": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/*.{spec,test}.{ts,tsx}"],
+      "javascript": {
+        "globals": [
+          "describe",
+          "it",
+          "test",
+          "expect",
+          "vi",
+          "beforeAll",
+          "afterAll",
+          "beforeEach",
+          "afterEach"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+import type { ArtifactItem } from "@/schemas/workspace.ts";
+
+export const mockArtifacts: ArtifactItem[] = [
+  {
+    id: "art-1",
+    routeId: "route-main",
+    artifactCode: "art_layout",
+    title: "三栏布局方案",
+    format: "markdown",
+    sizeLabel: "3.2 KB",
+    summary: "三栏静态结构与交互定义",
+    producedBy: "@T4",
+    createdAt: "19:44",
+  },
+  {
+    id: "art-2",
+    routeId: "route-main",
+    artifactCode: "art_schema",
+    title: "工作台数据契约",
+    format: "json",
+    sizeLabel: "4.6 KB",
+    summary: "会话树与任务单字段清单",
+    producedBy: "@T1",
+    createdAt: "19:45",
+  },
+  {
+    id: "art-3",
+    routeId: "route-gpi",
+    artifactCode: "art_gpi_events",
+    title: "事件流协议草案",
+    format: "json",
+    sizeLabel: "5.1 KB",
+    summary: "连接状态与增量推送载荷",
+    producedBy: "@T1",
+    createdAt: "18:22",
+  },
+  {
+    id: "art-4",
+    routeId: "route-policy",
+    artifactCode: "art_lock_rules",
+    title: "目录锁策略表",
+    format: "json",
+    sizeLabel: "2.1 KB",
+    summary: "角色读写锁与排队规则",
+    producedBy: "主路由",
+    createdAt: "17:06",
+  },
+];
