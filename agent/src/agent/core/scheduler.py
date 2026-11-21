@@ -432,6 +432,10 @@ class WorkspaceLockManager:
                 raise
         except Exception as exc:  # noqa: BLE001  # Worker 边界：统一捕获、落盘并上报所有工具/模型/网络异常
             err_msg = format_exception_detail(exc)
+            if "_logged_by_error_hook" not in getattr(exc, "__notes__", ()):
+                logfire.error("Role worker failed", main_conversation_id=main_conversation_id, task_id=task_id, role_name=role.name, run_id=worker_run_id, error_type=type(exc).__name__, error=err_msg)
+            if self._mcp_manager is not None and "OAuth authorization required" in err_msg:
+                self._mcp_manager.invalidate(ticket.work_path)
             f_row = await self._ticket_store.update_ticket_status(main_conversation_id, task_id, status="failed", result_summary=err_msg)
             self._bridge.emit_worker_outcome(row=f_row, run_id=worker_run_id, outcome="failed", error_code=type(exc).__name__, error_message=err_msg)
             status_persisted = True

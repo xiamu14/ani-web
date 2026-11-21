@@ -52,18 +52,21 @@ async def _handle_validation(request: Request, exc: Exception) -> Response:
 
 
 async def _handle_internal_error(request: Request, exc: Exception) -> Response:
+    from agent.hooks import format_exception_detail
+
+    detail = format_exception_detail(exc)
     logfire.error(
         "Unhandled server exception",
         path=request.url.path,
         method=request.method,
         error_type=type(exc).__name__,
-        error=str(exc) or type(exc).__name__,
+        error=detail,
     )
     return json_error(
         request,
         status_code=500,
         code=type(exc).__name__,
-        message=str(exc) or type(exc).__name__,
+        message=detail,
     )
 
 

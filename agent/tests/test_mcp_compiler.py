@@ -216,21 +216,53 @@ class TestMcpAuthAndCompiler(unittest.IsolatedAsyncioTestCase):
                 build_fastmcp_auth(specs["m2m_srv"], token_root=token_root),
                 ClientCredentialsOAuthProvider,
             )
+            # 运行期(interactive=False)未落盘真实 access_token 时绝不挂载 OAuth 状态机
+            self.assertIsNone(
+                build_fastmcp_auth(
+                    specs["oauth_srv"], token_root=token_root, encryption_key=fernet_key
+                )
+            )
+            # 仅外部扩展授权接口(interactive=True)挂载交互式 OAuth
             oauth_auth: object = build_fastmcp_auth(
-                specs["oauth_srv"], token_root=token_root, encryption_key=fernet_key
+                specs["oauth_srv"],
+                token_root=token_root,
+                encryption_key=fernet_key,
+                interactive=True,
             )
             self.assertIsInstance(oauth_auth, OAuth)
 
-            checker = LocalOAuthReadinessChecker(token_root=token_root)
+            checker = LocalOAuthReadinessChecker(
+                token_root=token_root, encryption_key=fernet_key
+            )
             self.assertFalse(await checker.is_ready(specs["oauth_srv"]))
             self.assertTrue(await checker.is_ready(specs["m2m_srv"]))
             self.assertTrue(await checker.is_ready(specs["bearer_srv"]))
+
+            # 仅有集合元数据(-info.json)与动态注册 client_info 时，不得误判为已授权就绪
+            ns_dir = token_namespace_dir(specs["oauth_srv"], token_root=token_root)
+            ns_dir.mkdir(parents=True, exist_ok=True)
+            (ns_dir / "S_mcp_oauth_token-3a009b34-info.json").write_text("{}", encoding="utf-8")
+            client_dir = ns_dir / "S_mcp_oauth_client_info-92af0fc1"
+            client_dir.mkdir(parents=True, exist_ok=True)
+            (client_dir / "S_https_example_client_info-b5ad3293.json").write_text(
+                '{"value": {"client_id": "cid-1"}}', encoding="utf-8"
+            )
+            self.assertFalse(await checker.is_ready(specs["oauth_srv"]))
+            self.assertIsNone(
+                build_fastmcp_auth(
+                    specs["oauth_srv"], token_root=token_root, encryption_key=fernet_key
+                )
+            )
 
             store = build_token_storage(
                 specs["oauth_srv"], token_root=token_root, encryption_key=fernet_key
             )
             await store.put(key="tok", value={"access_token": "abc"})
             self.assertTrue(await checker.is_ready(specs["oauth_srv"]))
+            runtime_oauth_auth: object = build_fastmcp_auth(
+                specs["oauth_srv"], token_root=token_root, encryption_key=fernet_key
+            )
+            self.assertIsInstance(runtime_oauth_auth, BearerAuth)
 
             global_oauth_spec = merge_mcp_configs(
                 global_config={

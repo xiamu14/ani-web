@@ -1,4 +1,4 @@
-# 核心调度与 Context Tree 实施计划（TODO）
+# 核心调度与 conversation Tree 实施计划（TODO）
 
 本文在 [Context Tree 架构设计](./1117-conversation-tree.md)、[Super-Agent 架构设计](./1117-super-agent.md) 与 [重启恢复扩展设计](./1117-super-agent2.md) 基础上，采用**强解耦、依赖倒置**原则，规划从 Context Tree 生命周期到 Router 协调及后台调度的分步实施路径。
 

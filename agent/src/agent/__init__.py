@@ -12,7 +12,11 @@ from typing import Any
 from fastmcp.client.elicitation import ElicitResult
 
 from agent.core.runtime import open_runtime
-from agent.extensions import build_mcp_toolset, load_mcp_configs
+from agent.extensions import (
+    build_mcp_toolset,
+    load_mcp_configs,
+    run_interactive_oauth,
+)
 
 
 async def cli_elicitation_handler(
@@ -36,6 +40,8 @@ async def _run_mcp_auth(server_name: str, *, work_path: Path | None = None) -> i
     if target is None:
         print(f"未找到 MCP server: {server_name!r}")
         return 1
+    if target.auth.type == "oauth":
+        await run_interactive_oauth(target)
     toolset = build_mcp_toolset(target)
     async with toolset:
         tools = await toolset.list_tools()

@@ -34,15 +34,27 @@
 ### 3. MCP 渐进披露、认证模型与懒连接（基于 `MCPToolset` + `MCP` Capability）
 - **协议与复用底座**：基于已安装的 `mcp`（支持 `2026-07-28` 无状态协议、`server/discover`、MRTR 与 Extensions）+ `fastmcp` + `pydantic_ai.mcp.MCPToolset`，由底层统一屏蔽无状态 HTTP 与有状态 Stdio/SSE 差异。由于 `pydantic_ai.capabilities.MCP(url=...)` 不透传 `auth` / `verify` / `StdioTransport`，且 `load_mcp_toolsets()` 不支持 `auth` 与两级合并，统一由自研薄 Loader 构造配置完整的 `MCPToolset` 后封装为 `MCP(local=toolset, ...)`（或按 `defer_loading` 挂载）。
 - **配置边界**：支持合并「全局配置（`~/.agent/mcp.json`）+ 当前工作区自身配置（`<work_path>/.agent/mcp.json`）」，支持 `${VAR}` / `${VAR:-default}` 环境变量展开；遵循 `AGENTS.md` 边界原则，不向上继承父目录。项目级配置不得越权读取或复用全局同名 Server 的已授权 OAuth Token。
-- **MCP 认证模型（Auth）**：
+- **MCP 认证模型（Auth）与“外部扩展授权 / Role 运行期只读消费”严格解耦**：
+  - **核心架构红线（Role Agent 零 OAuth 参与）**：
+    - **MCP OAuth 授权是独立的外部扩展管理行为**，仅由外部扩展接口（GUI 协议 `POST /v1/mcps/{name}/auth` 或 CLI `agent mcp auth <name>`）显式触发；
+    - **Role Agent 工具集（`select_mcp_capabilities_for_role`）与预编译探测器（`FastMcpProbeAdapter`）严禁参与任何 OAuth 流程**，严禁挂载 `fastmcp.client.auth.OAuth` / `OAuthClientProvider` 状态机（即在 Role Agent 运行期绝对不执行 `.well-known` 发现、不执行 `POST /oauth/register` 动态客户端注册、不生成授权 URL、不触发 `redirect_handler`）。
   - **Stdio**：通过 `command` / `args` / `env`（`${VAR}` 注入）传递本地凭据，不走 HTTP OAuth。
-  - **HTTP / SSE**：支持 `headers`（自定义 Header）以及结构化 `auth` 块：
+  - **HTTP / SSE 认证映射（分路径隔离）**：支持 `headers`（自定义 Header）以及结构化 `auth` 块：
     - `none`（默认）；
-    - `bearer`：`token`（支持 `${VAR}`，映射为 `fastmcp.client.auth.BearerAuth`）；
-    - `oauth`（OAuth 2.1 + PKCE + RFC 9728 `401 WWW-Authenticate` 自动发现 + RFC 8707 `resource` 绑定 + RFC 9207 `iss` 校验 + CIMD `client_metadata_url`）：支持 `scopes`、`client_id`、`client_secret`、`callback_port`、`client_metadata_url`；
-    - `oauth_client_credentials`（无头 M2M，映射为 `ClientCredentialsOAuthProvider`）：支持 `client_id`、`client_secret`、`scopes`、`token_endpoint_auth_method`、`issuer`；
+    - `bearer`：`token`（支持 `${VAR}`，映射为静态 `fastmcp.client.auth.BearerAuth`）；
+    - `oauth`（OAuth 2.1 + PKCE）：支持 `scopes`、`client_id`、`client_secret`、`callback_port`、`client_metadata_url`，按触发路径严格一分为二：
+      1. **外部扩展授权路径（`run_interactive_oauth`，仅限 `POST /v1/mcps/{name}/auth` 与 `agent mcp auth <name>`）**：
+         - 完全独立于 `MCPToolset` / `FastMCPClient`，直接由 `run_interactive_oauth(spec)` 驱动 `_InteractiveOAuth` + `httpx2.AsyncClient` 完成 PRM（`/.well-known/oauth-protected-resource`）与 OASM 发现、全量 `scopes_supported` 申请、动态客户端注册（绑定稳定 `callback_port`）、拉起系统浏览器完成用户授权并回调落盘 `access_token`；
+         - `_InteractiveOAuth._auth_flow` 必须通过 `try ... finally: await flow.aclose()` 保证在同一协程任务内释放 `anyio.Lock`，防止网络中断产生跨任务锁释放异常；
+         - 即使目标 MCP Server（如 `knowra`）允许匿名请求返回 `200 OK`，当本地无有效 Token 时也强制触发完整 OAuth 授权；
+         - 覆写 `redirect_handler` 直接拉起系统浏览器，**移除 `fastmcp` 默认在拉起浏览器前使用后端 `httpx2` 发起的多余预检 `GET` 请求**；
+         - 若远端连接/代理 TLS 握手失败或用户未完成授权，接口捕获异常并返回结构化 `502`（`OAUTH_FLOW_FAILED` / `OAUTH_INCOMPLETE`，含 `format_exception_detail` 根因链），绝不抛出未捕获 `500`；授权成功后刷新 `WorkspaceMcpManager` 预编译快照。
+      2. **Role Agent 运行期与预编译探测路径（`interactive=False`）**：
+         - **只读准入校验（`LocalOAuthReadinessChecker`）**：无阻塞读取 `~/.agent/mcp_tokens/` 下该 Server 命名空间目录，**精确解析真实 Token 条目文件中的非空 `access_token`**（严格排除 `FileTreeStore` 自动生成的 `*-info.json` 集合头元数据文件、DCR `client_info` 文件与 `token_expiry` 文件），并校验未过期（`expires_at > now + 30s`）。若无有效 `access_token`，直接判定 `is_ready = False`，预编译器返回 `status="auth_required"` 并纳入 `blocked_servers`，**严禁挂载到任何 Role Agent**；
+         - **纯静态 Bearer 注入**：当 `is_ready = True` 时，`build_fastmcp_auth(spec, interactive=False)` 直接从本地已落盘的 Token 存储中提取 `access_token` 字符串，构造**纯静态 `BearerAuth(access_token)`** 注入 `MCPToolset`。若运行期远端吊销 Token 返回 `401`，直接作为常规 HTTP/工具鉴权错误快速失败并使该工作区 MCP 缓存失效（回退为 `auth_required`），绝不在 Role Agent 内部启动 OAuth 状态机。
+    - `oauth_client_credentials`（无头 M2M，映射为 `ClientCredentialsOAuthProvider`）：支持 `client_id`、`client_secret`、`scopes`、`token_endpoint_auth_method`、`issuer`，支持全自动无头换取与预编译；
     - `oauth_private_key_jwt`（可选扩展）：JWT 断言认证。
-  - **OAuth Token 持久化与交互/无头分离**：复用 `py-key-value-aio` 的 `FileTreeStore`（存放在 `~/.agent/mcp_tokens/`，目录 `0700` / 文件 `0600`，支持可选 `FernetEncryptionWrapper` 静态加密）作为 `token_storage`，存储键绑定 `(scope, server_name, endpoint_fingerprint)`。`oauth`（PKCE）初次授权由 **CLI 交互模式/授权命令**完成并落盘；若启动 `Jev` 预编译或后台 Worker 时尚未完成授权，预编译器标记状态为 `auth_required` 并跳过该 Server，**绝不在无头后台阻塞等待浏览器回调**。`oauth_client_credentials` 支持全自动无头换取与预编译。
+  - **OAuth Token 持久化存储**：复用 `py-key-value-aio` 的 `FileTreeStore`（存放在 `~/.agent/mcp_tokens/`，目录 `0700` / 文件 `0600`，支持可选 `FernetEncryptionWrapper` 静态加密），存储键绑定 `(scope, server_name, endpoint_fingerprint)`。
 - **Elicitation / Sampling 策略（CLI 交互优先，后台无非必要兜底）**：
   - `MCPToolset` 默认不传 `elicitation_handler` 与 `sampling_model`（均为 `None`），在协议能力协商阶段不声明对应能力，确保绝大多数纯 Tool Server 零副作用、强依赖 Server 直接按工具失败处理而不静默挂死。
   - **Elicitation**：仅在 **CLI 交互模式**（存在 TTY）下按需注入轻量终端 `elicitation_handler`；后台 `WorkspaceLockManager` Worker 保持 `None`，现阶段不增加跨协程 `Ticket` 挂起兜底。

@@ -6,8 +6,10 @@ from agent.extensions.mcp_auth import (
     build_fastmcp_auth,
     build_token_storage,
     clear_oauth_cache,
+    extract_persisted_access_token,
     has_persisted_oauth_files,
     resolve_oauth_callback_port,
+    run_interactive_oauth,
     token_namespace_dir,
 )
 from agent.extensions.mcp_config import (
@@ -89,12 +91,14 @@ __all__ = [
     "compute_endpoint_fingerprint",
     "compute_tool_schema_hash",
     "expand_env_vars",
+    "extract_persisted_access_token",
     "has_persisted_oauth_files",
     "load_mcp_configs",
     "merge_mcp_configs",
     "merge_workspace_mcp_specs",
     "parse_semver",
     "resolve_oauth_callback_port",
+    "run_interactive_oauth",
     "select_mcp_capabilities_for_role",
     "token_namespace_dir",
 ]

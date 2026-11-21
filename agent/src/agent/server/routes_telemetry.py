@@ -4,14 +4,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import logfire
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
 from agent.core.budget import ROUTER_BUDGET_POLICY
-from agent.extensions import build_mcp_toolset, clear_oauth_cache
+from agent.extensions import (
+    LocalOAuthReadinessChecker,
+    run_interactive_oauth,
+)
 from agent.extensions.mcp_config import load_mcp_configs
 from agent.extensions.skill_resolver import SkillCatalogResolver, SkillScope
+from agent.hooks import format_exception_detail
 from agent.protocol import (
     ContextWindowSnapshotView,
     McpServerView,
@@ -225,10 +230,31 @@ async def auth_mcp_endpoint(request: Request) -> Response:
             code="INVALID_ARGUMENT",
             message=f"MCP server {name!r} auth type is {spec.auth.type!r}, not 'oauth'.",
         )
-    clear_oauth_cache(spec, clear_client_info=True)
-    toolset = build_mcp_toolset(spec, interactive=True)
-    async with toolset:
-        _ = await toolset.list_tools()
+    try:
+        await run_interactive_oauth(spec)
+    except Exception as exc:  # noqa: BLE001  # 外部扩展 OAuth 边界：捕获网络/代理/授权异常并返回结构化 502
+        detail = format_exception_detail(exc)
+        logfire.error(
+            "MCP interactive OAuth failed",
+            server_name=name,
+            url=spec.url,
+            error_type=type(exc).__name__,
+            error=detail,
+        )
+        return json_error(
+            request,
+            status_code=502,
+            code="OAUTH_FLOW_FAILED",
+            message=f"MCP OAuth connection/authorization failed for {name!r} ({spec.url}): {detail}",
+        )
+
+    if not await LocalOAuthReadinessChecker().is_ready(spec):
+        return json_error(
+            request,
+            status_code=502,
+            code="OAUTH_INCOMPLETE",
+            message=f"OAuth authorization for {name!r} did not persist a valid access token.",
+        )
 
     if rt.mcp_manager is not None:
         rt.mcp_manager.invalidate(work_path)

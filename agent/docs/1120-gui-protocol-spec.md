@@ -269,6 +269,9 @@ class ErrorEnvelope(BaseModel):
 | | `GET /v1/workspace-locks` | 查看所有活跃工作区读写锁持有者与排队任务 |
 | **上下文与用量** | `GET /v1/conversations/{cid}/context` | 获取最近一次 Context Window 9 桶分类明细与省流指标（支持主会话及 Role 会话） |
 | | `GET /v1/conversations/{cid}/usage` | 获取 Step / Run / Task / Tree 三层 Token、Cost 与 Jev 辅助用量汇总 |
+| **扩展与 MCP 授权** | `GET /v1/skills` | 查询当前工作区生效的三层 Skills 目录清单与跳过项 |
+| | `GET /v1/mcps` | 查询当前工作区生效的 MCP Servers 状态（`blocked`、`compile_status`、`compile_error` 与已定级工具策略） |
+| | `POST /v1/mcps/{name}/auth` | **独立外部扩展 OAuth 授权入口**：触发指定 OAuth MCP Server 的浏览器 PKCE 授权、落盘并校验 `access_token`，随后刷新工作区 Jev 预编译快照（与 Role Agent 运行期工具调用完全解耦） |
 
 ### 5.2 消息发送、两阶段附件传递与溯源预览
 

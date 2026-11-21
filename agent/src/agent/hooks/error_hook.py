@@ -122,4 +122,5 @@ class RunErrorReportingHook(AbstractCapability[object]):
             error_type=type(error).__name__,
             error=format_exception_detail(error),
         )
+        error.add_note("_logged_by_error_hook")
         raise error
