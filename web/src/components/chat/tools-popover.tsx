@@ -10,7 +10,11 @@ import type {
   SkillScopeLiteral,
   SkillView,
 } from "@/protocol/types.ts";
-import { connectionStore, refreshCapabilities } from "@/store/connection.ts";
+import {
+  authorizeMcpServer,
+  connectionStore,
+  refreshCapabilities,
+} from "@/store/connection.ts";
 import { workspaceStore } from "@/store/workspace.ts";
 
 const QUICK_COMMANDS = [
@@ -132,44 +136,75 @@ function SkillsSection({
 }
 
 function McpRow({
+  activeRouteId,
+  authError,
+  authorizing,
   server,
   onSelect,
 }: {
+  readonly activeRouteId: string;
+  readonly authError: string | null;
+  readonly authorizing: boolean;
   readonly server: McpServerView;
   readonly onSelect: (token: string) => void;
 }) {
   const meta = getMcpStatusMeta(server);
+  const needsAuth = server.blocked || Boolean(server.compile_error);
   const handleClick = useCallback(
     () => onSelect(`@mcp:${server.name} `),
     [onSelect, server.name]
   );
+  const handleAuth = useCallback(() => {
+    void authorizeMcpServer(server.name, activeRouteId || undefined);
+  }, [activeRouteId, server.name]);
 
   return (
-    <li>
-      <button
-        className="hover:bg-surface-hover flex w-full cursor-pointer items-center justify-between gap-2 rounded-md px-1.5 py-1 text-left text-[11px] transition-colors"
-        onClick={handleClick}
-        title={server.compile_error ?? server.description ?? server.name}
-        type="button"
-      >
-        <span className="text-text truncate font-medium">{server.name}</span>
+    <li className="flex flex-col gap-1">
+      <div className="hover:bg-surface-hover flex items-center justify-between gap-2 rounded-md px-1.5 py-1 text-[11px] transition-colors">
+        <button
+          className="text-text min-w-0 flex-1 cursor-pointer truncate text-left font-medium"
+          onClick={handleClick}
+          title={server.compile_error ?? server.description ?? server.name}
+          type="button"
+        >
+          {server.name}
+        </button>
         <div className="flex shrink-0 items-center gap-1.5">
           <span className="text-text-muted font-mono">
             {server.tools.length}
           </span>
           <Badge tone={meta.tone}>{meta.label}</Badge>
+          {needsAuth ? (
+            <Button
+              disabled={authorizing}
+              onClick={handleAuth}
+              size="xs"
+              variant="subtle"
+            >
+              {authorizing ? "授权中" : "授权"}
+            </Button>
+          ) : null}
         </div>
-      </button>
+      </div>
+      {authError ? (
+        <p className="px-1.5 text-[11px] text-rose-500">{authError}</p>
+      ) : null}
     </li>
   );
 }
 
 function McpSection({
+  activeRouteId,
+  authorizingByName,
+  errorByName,
   servers,
   statusLabel,
   tone,
   onSelect,
 }: {
+  readonly activeRouteId: string;
+  readonly authorizingByName: Record<string, boolean>;
+  readonly errorByName: Record<string, string | null>;
   readonly servers: readonly McpServerView[];
   readonly statusLabel: string;
   readonly tone: "emerald" | "amber" | "neutral";
@@ -188,7 +223,14 @@ function McpSection({
       ) : (
         <ul className="flex max-h-32 flex-col gap-0.5 overflow-y-auto">
           {servers.map((server) => (
-            <McpRow key={server.name} onSelect={onSelect} server={server} />
+            <McpRow
+              activeRouteId={activeRouteId}
+              authError={errorByName[server.name] ?? null}
+              authorizing={authorizingByName[server.name] ?? false}
+              key={server.name}
+              onSelect={onSelect}
+              server={server}
+            />
           ))}
         </ul>
       )}
@@ -205,6 +247,14 @@ export function ToolsPopover({
   const status = useSelector(connectionStore, (s) => s.status);
   const skills = useSelector(connectionStore, (s) => s.skills);
   const mcpServers = useSelector(connectionStore, (s) => s.mcpServers);
+  const authorizingMcpNames = useSelector(
+    connectionStore,
+    (s) => s.authorizingMcpNames
+  );
+  const mcpAuthErrorByName = useSelector(
+    connectionStore,
+    (s) => s.mcpAuthErrorByName
+  );
   const activeRouteId = useSelector(workspaceStore, (s) => s.activeRouteId);
 
   let skillStatus = "未连接";
@@ -270,6 +320,9 @@ export function ToolsPopover({
             tone={skillTone}
           />
           <McpSection
+            activeRouteId={activeRouteId}
+            authorizingByName={authorizingMcpNames}
+            errorByName={mcpAuthErrorByName}
             onSelect={handleSelectCommand}
             servers={mcpServers}
             statusLabel={mcpStatus}

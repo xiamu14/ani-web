@@ -1,6 +1,6 @@
 import { Link01Icon, Refresh01Icon } from "@hugeicons/core-free-icons";
 import { useSelector } from "@tanstack/react-store";
-import type { ChangeEvent, FormEvent } from "react";
+import type { ChangeEvent, SubmitEvent } from "react";
 import { useCallback, useState } from "react";
 import { Button } from "@/components/ui/button.tsx";
 import { Icon } from "@/components/ui/icon.tsx";
@@ -49,7 +49,7 @@ export function ConnectionPopover() {
   );
 
   const handleConnect = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
+    (event: SubmitEvent<HTMLFormElement>) => {
       event.preventDefault();
       void connectRuntime({
         baseUrl: baseUrl.trim(),

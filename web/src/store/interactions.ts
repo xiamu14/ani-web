@@ -60,6 +60,28 @@ export function removeInteraction(interactionId: string): void {
   });
 }
 
+export function prioritizeInteraction(interactionId: string): void {
+  interactionStore.setState((state) => {
+    const index = state.pending.findIndex(
+      (item) => item.interaction_id === interactionId
+    );
+    if (index <= 0) {
+      return state;
+    }
+    const target = state.pending[index];
+    if (!target) {
+      return state;
+    }
+    const rest = state.pending.filter(
+      (item) => item.interaction_id !== interactionId
+    );
+    return {
+      ...state,
+      pending: [target, ...rest],
+    };
+  });
+}
+
 export function clearInteractions(): void {
   interactionStore.setState(() => ({
     pending: [],

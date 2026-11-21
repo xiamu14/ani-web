@@ -22,6 +22,7 @@ import {
   interactionStore,
   submitInteractionResponse,
 } from "@/store/interactions.ts";
+import { workspaceStore } from "@/store/workspace.ts";
 
 function ApprovalItemRow({
   item,
@@ -460,55 +461,66 @@ function ElicitationCard({
 }
 
 export function InteractionBanner() {
+  const activeRouteId = useSelector(workspaceStore, (s) => s.activeRouteId);
   const pending = useSelector(interactionStore, (s) => s.pending);
   const submittingIds = useSelector(interactionStore, (s) => s.submittingIds);
   const errorById = useSelector(interactionStore, (s) => s.errorById);
 
-  if (pending.length === 0) {
+  const routePending = activeRouteId
+    ? pending.filter((item) => item.conversation_id === activeRouteId)
+    : pending;
+  const [current] = routePending;
+
+  if (!current) {
+    return null;
+  }
+
+  const submitting = submittingIds[current.interaction_id] ?? false;
+  const error = errorById[current.interaction_id] ?? null;
+
+  let card: React.ReactNode = null;
+  if (current.kind === "approval" && current.approval) {
+    card = (
+      <ApprovalCard
+        error={error}
+        interaction={current}
+        payload={current.approval}
+        submitting={submitting}
+      />
+    );
+  } else if (current.kind === "ask_user" && current.ask_user) {
+    card = (
+      <AskUserCard
+        error={error}
+        interaction={current}
+        payload={current.ask_user}
+        submitting={submitting}
+      />
+    );
+  } else if (current.kind === "mcp_elicitation" && current.mcp_elicitation) {
+    card = (
+      <ElicitationCard
+        error={error}
+        interaction={current}
+        payload={current.mcp_elicitation}
+        submitting={submitting}
+      />
+    );
+  }
+
+  if (!card) {
     return null;
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      {pending.map((item) => {
-        const submitting = submittingIds[item.interaction_id] ?? false;
-        const error = errorById[item.interaction_id] ?? null;
-
-        if (item.kind === "approval" && item.approval) {
-          return (
-            <ApprovalCard
-              error={error}
-              interaction={item}
-              key={item.interaction_id}
-              payload={item.approval}
-              submitting={submitting}
-            />
-          );
-        }
-        if (item.kind === "ask_user" && item.ask_user) {
-          return (
-            <AskUserCard
-              error={error}
-              interaction={item}
-              key={item.interaction_id}
-              payload={item.ask_user}
-              submitting={submitting}
-            />
-          );
-        }
-        if (item.kind === "mcp_elicitation" && item.mcp_elicitation) {
-          return (
-            <ElicitationCard
-              error={error}
-              interaction={item}
-              key={item.interaction_id}
-              payload={item.mcp_elicitation}
-              submitting={submitting}
-            />
-          );
-        }
-        return null;
-      })}
+    <div className="flex flex-col gap-2">
+      {routePending.length > 1 ? (
+        <div className="flex items-center justify-between px-1 text-[11px]">
+          <span className="text-text-muted">待处理队列</span>
+          <Badge tone="amber">1 / {routePending.length}</Badge>
+        </div>
+      ) : null}
+      {card}
     </div>
   );
 }

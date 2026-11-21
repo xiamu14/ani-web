@@ -10,6 +10,7 @@ import type {
   InteractionRespondRequest,
   InteractionView,
   InterruptResponse,
+  McpServerView,
   McpsListView,
   RuntimeSnapshotView,
   SendMessageReceipt,
@@ -322,5 +323,26 @@ export class GuiProtocolClient {
 
   listMcps(): Promise<McpsListView> {
     return this.requestJson<McpsListView>("/v1/mcps");
+  }
+
+  authMcp(
+    name: string,
+    params?: {
+      conversation_id?: string;
+      work_path?: string;
+    }
+  ): Promise<McpServerView> {
+    const query = new URLSearchParams();
+    if (params?.conversation_id) {
+      query.set("conversation_id", params.conversation_id);
+    }
+    if (params?.work_path) {
+      query.set("work_path", params.work_path);
+    }
+    const qs = query.toString();
+    return this.requestJson<McpServerView>(
+      `/v1/mcps/${encodeURIComponent(name)}/auth${qs ? `?${qs}` : ""}`,
+      { method: "POST" }
+    );
   }
 }

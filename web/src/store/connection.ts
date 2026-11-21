@@ -52,10 +52,12 @@ export interface DiscoveredRuntime {
 }
 
 export interface ConnectionState {
+  authorizingMcpNames: Record<string, boolean>;
   baseUrl: string;
   discoveredRuntime: DiscoveredRuntime | null;
   error: string | null;
   latestSeq: number;
+  mcpAuthErrorByName: Record<string, string | null>;
   mcpServers: McpServerView[];
   modelName: string | null;
   poolStatus: LlmPoolStatusView | null;
@@ -108,6 +110,7 @@ function saveConfig(baseUrl: string, token: string): void {
 const initialConfig = loadSavedConfig();
 
 export const connectionStore = new Store<ConnectionState>({
+  authorizingMcpNames: {},
   baseUrl: initialConfig.baseUrl,
   token: initialConfig.token,
   status: "disconnected",
@@ -116,6 +119,7 @@ export const connectionStore = new Store<ConnectionState>({
   modelName: null,
   trustedLocal: false,
   latestSeq: 0,
+  mcpAuthErrorByName: {},
   mcpServers: [],
   subscriptionId: null,
   poolStatus: null,
@@ -370,6 +374,63 @@ function handlePartEvent(event: ProtocolEvent): boolean {
   return false;
 }
 
+function handleRunTerminated(
+  event: Extract<ProtocolEvent, { type: "run.interrupted" | "run.failed" }>,
+  threadId: string | null
+): void {
+  if (event.channel === "task_stream") {
+    const mainThreadId =
+      event.conversation_id ?? workspaceStore.state.activeRouteId;
+    if (mainThreadId && event.type === "run.failed") {
+      const errorText =
+        event.payload.error_message || event.payload.error_code || "任务失败";
+      upsertStreamingAssistantMessage(mainThreadId, event.run_id, (msg) => ({
+        ...msg,
+        sender: "role",
+        senderLabel: event.task_id ? `后台任务 @${event.task_id}` : "后台任务",
+        streaming: false,
+        error: errorText,
+      }));
+    }
+    return;
+  }
+
+  markConversationRunning(event.conversation_id, false);
+  if (!threadId) {
+    return;
+  }
+  const errorText =
+    event.type === "run.failed"
+      ? event.payload.error_message || event.payload.error_code || "运行失败"
+      : "运行已中断";
+  const actions =
+    event.type === "run.failed" ? event.payload.suggested_actions : [];
+  upsertStreamingAssistantMessage(threadId, event.run_id, (msg) => ({
+    ...msg,
+    streaming: false,
+    error: errorText,
+    ...(msg.steps
+      ? {
+          steps: msg.steps.map((step) =>
+            step.status === "running"
+              ? { ...step, status: "error" as const }
+              : step
+          ),
+        }
+      : {}),
+    ...(actions.length > 0
+      ? {
+          suggestedActions: actions.map((act) => ({
+            id: act.action_id,
+            label: act.label,
+            action: act.action_type,
+            payload: act.payload,
+          })),
+        }
+      : {}),
+  }));
+}
+
 function handleRunLifecycleEvent(event: ProtocolEvent): boolean {
   const threadId = resolveThreadIdFromEvent(event);
   if (event.type === "run.started") {
@@ -418,18 +479,7 @@ function handleRunLifecycleEvent(event: ProtocolEvent): boolean {
     return true;
   }
   if (event.type === "run.interrupted" || event.type === "run.failed") {
-    markConversationRunning(event.conversation_id, false);
-    if (threadId) {
-      const errorText =
-        event.type === "run.failed"
-          ? event.payload.error_message
-          : "运行已中断";
-      upsertStreamingAssistantMessage(threadId, event.run_id, (msg) => ({
-        ...msg,
-        streaming: false,
-        error: errorText,
-      }));
-    }
+    handleRunTerminated(event, threadId);
     return true;
   }
   return false;
@@ -795,6 +845,44 @@ export async function refreshCapabilities(
   }));
 }
 
+export async function authorizeMcpServer(
+  name: string,
+  conversationId?: string
+): Promise<boolean> {
+  const client = getProtocolClient();
+  if (!client) {
+    return false;
+  }
+  connectionStore.setState((state) => ({
+    ...state,
+    authorizingMcpNames: { ...state.authorizingMcpNames, [name]: true },
+    mcpAuthErrorByName: { ...state.mcpAuthErrorByName, [name]: null },
+  }));
+
+  try {
+    const updated = await client.authMcp(
+      name,
+      conversationId ? { conversation_id: conversationId } : undefined
+    );
+    connectionStore.setState((state) => ({
+      ...state,
+      authorizingMcpNames: { ...state.authorizingMcpNames, [name]: false },
+      mcpServers: state.mcpServers.map((server) =>
+        server.name === updated.name ? updated : server
+      ),
+    }));
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "MCP 授权失败";
+    connectionStore.setState((state) => ({
+      ...state,
+      authorizingMcpNames: { ...state.authorizingMcpNames, [name]: false },
+      mcpAuthErrorByName: { ...state.mcpAuthErrorByName, [name]: message },
+    }));
+    return false;
+  }
+}
+
 export async function refreshRuntimeSnapshot(): Promise<void> {
   const client = getProtocolClient();
   if (!client) {
@@ -968,8 +1056,10 @@ export function disconnectRuntime(): void {
   }));
   connectionStore.setState((state) => ({
     ...state,
+    authorizingMcpNames: {},
     status: "disconnected",
     error: null,
+    mcpAuthErrorByName: {},
     mcpServers: [],
     subscriptionId: null,
     runningConversationIds: [],

@@ -262,7 +262,7 @@ function MessageBody({
       {error ? (
         <div className="mt-2 flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-2 text-xs text-rose-500">
           <Icon className="mt-0.5 shrink-0" icon={AlertCircleIcon} size="xs" />
-          <span>{error}</span>
+          <span className="min-w-0 break-all whitespace-pre-wrap">{error}</span>
         </div>
       ) : null}
     </>

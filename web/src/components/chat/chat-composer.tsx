@@ -104,7 +104,7 @@ export function ChatComposer() {
   const pendingInteractions = useSelector(interactionStore, (s) => s.pending);
   const isConnected = connectionStatus === "connected";
   const routerBlocked = pendingInteractions.some(
-    (item) => item.conversation_id === activeRouteId && !item.task_id
+    (item) => item.conversation_id === activeRouteId
   );
 
   const [draft, setDraft] = useState("");
