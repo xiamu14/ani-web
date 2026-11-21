@@ -18,6 +18,7 @@ from pydantic_ai.messages import (
     ToolReturnPart,
     UserPromptPart,
 )
+from pydantic_ai.usage import RunUsage
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlmodel import col, select
@@ -27,6 +28,7 @@ from agent.db._conv_helpers import load_message_async, utc_iso
 from agent.db.conversation_store import LAST_ACTIVE_CONV_KEY, ROOT_ENTRY_KEY
 from agent.db.models import (
     AppStateRow,
+    ContextEntryRow,
     ContextSnapshotRow,
     ConversationAuxUsageRow,
     ConversationRow,
@@ -41,6 +43,8 @@ _EXT_ID_RE = re.compile(r"\bid=(att_[a-zA-Z0-9]+)\b")
 class TreeBranchRecord:
     row: ConversationRow
     task_id: str | None = None
+    task_status: str | None = None
+    usage: RunUsage = field(default_factory=RunUsage)
     message_count: int = 0
     active_task_count: int = 0
 
@@ -176,26 +180,63 @@ class SQLModelProtocolStore:
                 stmt = stmt.where(col(ConversationRow.scope) == "main")
             convs = list((await session.execute(stmt)).scalars().all())
             tickets = list((await session.execute(select(TicketRow))).scalars().all())
+            entry_rows = (
+                await session.execute(
+                    select(
+                        col(ContextEntryRow.id),
+                        col(ContextEntryRow.parent_id),
+                        col(ContextEntryRow.kind),
+                        col(ContextEntryRow.stop_backtrack),
+                    )
+                )
+            ).all()
 
-        role_to_task: dict[str, str] = {}
+        entry_meta: dict[str, tuple[str | None, str, int]] = {
+            str(r[0]): (str(r[1]) if r[1] is not None else None, str(r[2]), int(r[3]))
+            for r in entry_rows
+        }
+
+        def _count_branch_messages(head_id: str | None) -> int:
+            count = 0
+            cur = head_id
+            seen: set[str] = set()
+            while cur is not None and cur not in seen:
+                seen.add(cur)
+                meta = entry_meta.get(cur)
+                if meta is None:
+                    break
+                parent_id, kind, stop_bt = meta
+                if kind == "message":
+                    count += 1
+                if stop_bt == 1:
+                    break
+                cur = parent_id
+            return count
+
+        role_to_task: dict[str, tuple[str, str]] = {}
         active_tasks_by_main: dict[str, int] = {}
         for t in tickets:
             if t.role_conversation_id:
-                role_to_task[t.role_conversation_id] = t.task_id
+                role_to_task[t.role_conversation_id] = (t.task_id, t.status)
             if t.status in ("queued", "running"):
                 active_tasks_by_main[t.main_conversation_id] = (
                     active_tasks_by_main.get(t.main_conversation_id, 0) + 1
                 )
 
-        records = [
-            TreeBranchRecord(
-                row=c,
-                task_id=role_to_task.get(c.conversation_id),
-                message_count=int(_USAGE_ADAPTER.validate_json(c.usage_json).requests or 0),
-                active_task_count=active_tasks_by_main.get(c.conversation_id, 0),
+        records: list[TreeBranchRecord] = []
+        for c in convs:
+            task_info = role_to_task.get(c.conversation_id)
+            usage = _USAGE_ADAPTER.validate_json(c.usage_json)
+            records.append(
+                TreeBranchRecord(
+                    row=c,
+                    task_id=task_info[0] if task_info is not None else None,
+                    task_status=task_info[1] if task_info is not None else None,
+                    usage=usage,
+                    message_count=_count_branch_messages(c.head_entry_id),
+                    active_task_count=active_tasks_by_main.get(c.conversation_id, 0),
+                )
             )
-            for c in convs
-        ]
         return TreeTopologyData(
             root_entry_id=root_row.value if root_row is not None else None,
             active_conversation_id=active_row.value if active_row is not None else None,

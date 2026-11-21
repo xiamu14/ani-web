@@ -32,12 +32,14 @@ from agent.core.lock_queue import (
     as_lock_mode,
     format_worker_error,
 )
+from agent.core.mcp_workspace import WorkspaceMcpManager
 from agent.core.outcome_judge import ToolExecutionTrace, evaluate_task_outcome
 from agent.core.roles import RoleRegistry, RoleSessionManager, RoleSpec
 from agent.db import SQLModelTicketStore, parse_depends_on
 from agent.extensions import (
     McpElicitationHandler,
     McpServerSpec,
+    merge_workspace_mcp_specs,
     select_mcp_capabilities_for_role,
 )
 from agent.hooks import LoopSafetyGuardHook, PermissionGuardHook, TaskSteerHook
@@ -76,7 +78,8 @@ class WorkspaceLockManager:
         mcp_specs: Sequence[McpServerSpec] = (), mcp_policies: Mapping[str, McpToolPolicy] | None = None,
         mcp_blocked_servers: frozenset[str] = _EMPTY_FROZENSET, mcp_prefixes: Sequence[str] = (),
         mcp_token_root: Path | None = None, elicitation_handler: McpElicitationHandler | None = None,
-        mcp_http_client: AsyncHTTPClient | None = None, memory_store: MemoryStorePort | None = None,
+        mcp_http_client: AsyncHTTPClient | None = None, mcp_manager: WorkspaceMcpManager | None = None,
+        memory_store: MemoryStorePort | None = None,
         llm_controller: LlmConcurrencyController | None = None, attachment_registry: AttachmentRegistry | None = None,
         event_bus: RuntimeEventBus | None = None, interaction_broker: InteractionBroker | None = None,
         extra_role_capabilities_factory: Callable[[str, str, str], Sequence[AbstractCapability[object]]] | None = None,
@@ -95,6 +98,7 @@ class WorkspaceLockManager:
         self._mcp_token_root: Path | None = mcp_token_root
         self._elicitation_handler: McpElicitationHandler | None = elicitation_handler
         self._mcp_http_client: AsyncHTTPClient | None = mcp_http_client
+        self._mcp_manager: WorkspaceMcpManager | None = mcp_manager
         self._memory_store: MemoryStorePort | None = memory_store
         self._llm_controller: LlmConcurrencyController | None = llm_controller
         self._attachment_registry: AttachmentRegistry | None = attachment_registry
@@ -102,6 +106,7 @@ class WorkspaceLockManager:
         self._interaction_broker: InteractionBroker | None = interaction_broker
         self._extra_role_caps_factory: Callable[[str, str, str], Sequence[AbstractCapability[object]]] | None = extra_role_capabilities_factory
         self._state: LockQueueState = LockQueueState()
+        self._user_cancelled_keys: set[tuple[str, str]] = set()
         self._bridge: TaskProtocolBridge = TaskProtocolBridge(
             event_bus=event_bus,
             interaction_broker=interaction_broker,
@@ -196,13 +201,8 @@ class WorkspaceLockManager:
 
         if ticket.status == "queued":
             merged = f"{ticket.mandate}\n\n[追加要求]\n{instruction}"
-            _ = await self._ticket_store.update_ticket_status(
-                main_conversation_id, norm_id, status="queued", mandate=merged
-            )
-            self._bridge.emit_steered(
-                main_conversation_id=main_conversation_id, task_id=norm_id,
-                role_name=ticket.role_name, mode="queued_merge", instruction=instruction,
-            )
+            _ = await self._ticket_store.update_ticket_status(main_conversation_id, norm_id, status="queued", mandate=merged)
+            self._bridge.emit_steered(main_conversation_id=main_conversation_id, task_id=norm_id, role_name=ticket.role_name, mode="queued_merge", instruction=instruction)
             return f"已将追加指令合并到排队中的 @{norm_id}。"
 
         if ticket.status not in ("completed", "failed", "interrupted"):
@@ -243,6 +243,7 @@ class WorkspaceLockManager:
 
         running_task = self._tasks.get(key)
         if ticket.status == "running" and running_task is not None and not running_task.done():
+            self._user_cancelled_keys.add(key)
             token = self._cancel_tokens.get(key)
             if token is not None:
                 token.cancel()
@@ -353,24 +354,23 @@ class WorkspaceLockManager:
                 )
                 policy = role.effective_budget_policy()
                 trace = ToolExecutionTrace()
+                if self._mcp_manager is not None:
+                    ws_mcp = await self._mcp_manager.ensure_compiled(ticket.work_path)
+                    eff_specs, eff_policies, eff_blocked, eff_prefixes = ws_mcp.specs, ws_mcp.policies, ws_mcp.blocked_servers, ws_mcp.prefixes
+                else:
+                    eff_specs, eff_prefixes = merge_workspace_mcp_specs(self._mcp_specs, self._mcp_prefixes, ticket.work_path)
+                    eff_policies, eff_blocked = self._mcp_policies, self._mcp_blocked_servers
                 extra_caps: list[AbstractCapability[object]] = [
                     LoopSafetyGuardHook(policy=policy, trace=trace),
                     TaskSteerHook(steer_queue, max_injections=policy.max_steer_injections),
-                    ToolExecutionQueueHook(
-                        workspace_root=ticket.work_path, coordinator=self._tool_coordinator,
-                        mcp_policies=self._mcp_policies, known_mcp_prefixes=self._mcp_prefixes,
-                    ),
+                    ToolExecutionQueueHook(workspace_root=ticket.work_path, coordinator=self._tool_coordinator, mcp_policies=eff_policies, known_mcp_prefixes=eff_prefixes),
                     *mem_bundle.capabilities,
-                    *select_mcp_capabilities_for_role(
-                        role.name, self._mcp_specs, policies=self._mcp_policies,
-                        blocked_servers=self._mcp_blocked_servers, token_root=self._mcp_token_root,
-                        elicitation_handler=self._elicitation_handler, http_client=self._mcp_http_client,
-                    ),
+                    *select_mcp_capabilities_for_role(role.name, eff_specs, policies=eff_policies, blocked_servers=eff_blocked, token_root=self._mcp_token_root, elicitation_handler=self._elicitation_handler, http_client=self._mcp_http_client),
                 ]
                 if self._permission_reviewer is not None:
                     perm_hook = PermissionGuardHook(
                         reviewer=self._permission_reviewer, workspace_root=ticket.work_path,
-                        user_intent=prompt_text, known_mcp_prefixes=self._mcp_prefixes, trace=trace,
+                        user_intent=prompt_text, known_mcp_prefixes=eff_prefixes, trace=trace,
                         main_conversation_id=main_conversation_id, task_id=task_id, role_name=role.name,
                     )
                     extra_caps.append(perm_hook)
@@ -419,39 +419,41 @@ class WorkspaceLockManager:
                     else (f"@{task_id} (@{role.name}) 未达成完成条件 [{verdict.reason_code}]（下游保持阻塞）:\n{result.output}", "failed")
                 )
         except (asyncio.CancelledError, RunCancelled) as exc:
-            c_row = await self._ticket_store.update_ticket_status(main_conversation_id, task_id, status="cancelled")
-            await self._ticket_store.remove_dependency(main_conversation_id, task_id)
-            self._bridge.emit_worker_outcome(row=c_row, run_id=worker_run_id, outcome="cancelled")
-            blocked_downstream, status_persisted = False, True
-            pending_event = (f"@{task_id} (@{role.name}) 已取消。", "cancelled")
+            is_user_cancel = key in self._user_cancelled_keys
+            target_status = "cancelled" if is_user_cancel else "interrupted"
+            c_row = await self._ticket_store.update_ticket_status(main_conversation_id, task_id, status=target_status)
+            if is_user_cancel:
+                await self._ticket_store.remove_dependency(main_conversation_id, task_id)
+                self._bridge.emit_worker_outcome(row=c_row, run_id=worker_run_id, outcome="cancelled")
+                blocked_downstream, status_persisted = False, True
+                pending_event = (f"@{task_id} (@{role.name}) 已取消。", "cancelled")
+            else:
+                self._bridge.emit_status_changed(c_row)
+                blocked_downstream, status_persisted = True, True
+                pending_event = (f"@{task_id} (@{role.name}) 已中断并保留断点（可通过 Revise 恢复）。", "interrupted")
             if isinstance(exc, asyncio.CancelledError):
                 raise
         except (AgentRunError, ModelAPIError, UsageLimitExceeded, TimeoutError) as exc:
             err_msg = format_worker_error(exc)
             logfire.error("Role worker failed", main_conversation_id=main_conversation_id, task_id=task_id, role_name=role.name, error=err_msg)
             f_row = await self._ticket_store.update_ticket_status(main_conversation_id, task_id, status="failed", result_summary=err_msg)
-            self._bridge.emit_worker_outcome(
-                row=f_row, run_id=worker_run_id, outcome="failed", error_code=type(exc).__name__, error_message=err_msg
-            )
+            self._bridge.emit_worker_outcome(row=f_row, run_id=worker_run_id, outcome="failed", error_code=type(exc).__name__, error_message=err_msg)
             status_persisted = True
             pending_event = (f"@{task_id} (@{role.name}) 执行失败（需人工 Revise 重试或取消上游）: {err_msg}", "failed")
         finally:
             if perm_hook is not None:
                 perm_hook.release_runs()
             if not status_persisted:
-                u_row = await self._ticket_store.update_ticket_status(
-                    main_conversation_id, task_id, status="failed", result_summary="Worker terminated unexpectedly."
-                )
+                u_row = await self._ticket_store.update_ticket_status(main_conversation_id, task_id, status="failed", result_summary="Worker terminated unexpectedly.")
                 self._bridge.emit_status_changed(u_row)
                 pending_event = (f"@{task_id} (@{role.name}) 意外终止并已标记为 failed。", "failed")
             otel_context.detach(otel_token)
-            _ = self._tasks.pop(key, None)
-            _ = self._cancel_tokens.pop(key, None)
-            _ = self._steer_queues.pop(key, None)
+            for m in (self._tasks, self._cancel_tokens, self._steer_queues):
+                _ = m.pop(key, None)
+            self._user_cancelled_keys.discard(key)
             await self._release_and_schedule_next(
                 main_conversation_id=main_conversation_id, task_id=task_id, work_path=ticket.work_path,
-                blocked_downstream=blocked_downstream, cancelled=not blocked_downstream and not status_persisted,
-                completion_event=pending_event,
+                blocked_downstream=blocked_downstream, cancelled=not blocked_downstream and not status_persisted, completion_event=pending_event,
             )
 
     async def _release_and_schedule_next(

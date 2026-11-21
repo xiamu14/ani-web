@@ -21,6 +21,7 @@ from agent.extensions.mcp_config import (
     expand_env_vars,
     load_mcp_configs,
     merge_mcp_configs,
+    merge_workspace_mcp_specs,
 )
 from agent.extensions.mcp_loader import (
     FastMcpProbeAdapter,
@@ -88,6 +89,7 @@ __all__ = [
     "has_persisted_oauth_files",
     "load_mcp_configs",
     "merge_mcp_configs",
+    "merge_workspace_mcp_specs",
     "parse_semver",
     "select_mcp_capabilities_for_role",
     "token_namespace_dir",

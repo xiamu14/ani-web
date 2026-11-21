@@ -6,6 +6,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from agent.core.budget import ROUTER_BUDGET_POLICY
 from agent.core.runtime import SuperAgentRuntime
 from agent.db.tree_queries import TreeTopologyData
 from agent.protocol import (
@@ -28,6 +29,9 @@ from agent.server.state import get_state, json_error, json_model, path_param
 
 
 def build_tree_view(topo: TreeTopologyData, rt: SuperAgentRuntime) -> TreeView:
+    pending_all = (
+        rt.interaction_broker.list_pending() if rt.interaction_broker is not None else []
+    )
     branches: list[BranchView] = []
     for rec in topo.branches:
         row = rec.row
@@ -36,6 +40,24 @@ def build_tree_view(topo: TreeTopologyData, rt: SuperAgentRuntime) -> TreeView:
             if row.branch_mode in ("root", "root_only", "handoff", "full_fork")
             else "root_only"
         )
+        is_role = rec.task_id is not None
+        if is_role:
+            pending_cnt = sum(
+                1
+                for p in pending_all
+                if p.conversation_id == row.parent_conversation_id and p.task_id == rec.task_id
+            )
+            running = rec.task_status == "running"
+            budget_policy = None
+        else:
+            pending_cnt = sum(
+                1
+                for p in pending_all
+                if p.conversation_id == row.conversation_id and p.task_id is None
+            )
+            running = rt.router.is_running(row.conversation_id)
+            budget_policy = ROUTER_BUDGET_POLICY
+
         branches.append(
             BranchView(
                 conversation_id=row.conversation_id,
@@ -50,9 +72,11 @@ def build_tree_view(topo: TreeTopologyData, rt: SuperAgentRuntime) -> TreeView:
                 forked_at=row.forked_at,
                 head_entry_id=row.head_entry_id,
                 status=row.status,
-                is_running=rt.router.is_running(row.conversation_id),
+                is_running=running,
                 message_count=rec.message_count,
                 active_task_count=rec.active_task_count,
+                pending_interaction_count=pending_cnt,
+                usage_summary=to_run_usage_view(rec.usage, budget_policy=budget_policy),
                 updated_at=row.updated_at,
             )
         )

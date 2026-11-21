@@ -54,6 +54,52 @@ def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSessi
     return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
+_COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    ("tickets", "depends_on_json", "TEXT NOT NULL DEFAULT '[]'"),
+)
+
+
+_TICKETS_REBUILD_SQL = """
+PRAGMA foreign_keys = OFF;
+CREATE TABLE tickets_new (
+    main_conversation_id TEXT NOT NULL REFERENCES conversations(conversation_id),
+    task_id TEXT NOT NULL,
+    role_conversation_id TEXT REFERENCES conversations(conversation_id),
+    role_name TEXT NOT NULL,
+    anchor_entry_id TEXT REFERENCES context_entries(id),
+    work_path TEXT,
+    lock_mode TEXT NOT NULL DEFAULT 'exclusive'
+        CHECK (lock_mode IN ('exclusive', 'shared', 'none')),
+    depends_on_json TEXT NOT NULL DEFAULT '[]',
+    mandate TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued'
+        CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled', 'interrupted')),
+    run_id TEXT,
+    result_summary TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (main_conversation_id, task_id)
+);
+INSERT INTO tickets_new (
+    main_conversation_id, task_id, role_conversation_id, role_name,
+    anchor_entry_id, work_path, lock_mode, depends_on_json, mandate,
+    status, run_id, result_summary, created_at, updated_at
+)
+SELECT
+    main_conversation_id, task_id, role_conversation_id, role_name,
+    anchor_entry_id, work_path, lock_mode, depends_on_json, mandate,
+    status, run_id, result_summary, created_at, updated_at
+FROM tickets;
+DROP TABLE tickets;
+ALTER TABLE tickets_new RENAME TO tickets;
+CREATE INDEX IF NOT EXISTS idx_tickets_status_created
+    ON tickets(main_conversation_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_tickets_role_conv_id
+    ON tickets(role_conversation_id);
+PRAGMA foreign_keys = ON;
+"""
+
+
 async def init_async_db(engine: AsyncEngine) -> None:
     """在异步引擎上幂等初始化全部表结构与索引。"""
     async with engine.begin() as conn:
@@ -62,4 +108,18 @@ async def init_async_db(engine: AsyncEngine) -> None:
         if driver_conn is None:
             raise RuntimeError("未能获取底层 aiosqlite 连接以执行 Schema 初始化。")
         await driver_conn.executescript(SCHEMA_SQL)
+        for table, col, ddl in _COLUMN_MIGRATIONS:
+            cursor = await driver_conn.execute(f"PRAGMA table_info({table})")
+            rows = await cursor.fetchall()
+            existing = {str(r[1]) for r in rows}
+            if col not in existing:
+                _ = await driver_conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"
+                )
+        cur = await driver_conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='tickets'"
+        )
+        t_row = await cur.fetchone()
+        if t_row and t_row[0] and "'shared'" not in str(t_row[0]):
+            await driver_conn.executescript(_TICKETS_REBUILD_SQL)
         await driver_conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

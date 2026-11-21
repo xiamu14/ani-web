@@ -223,7 +223,7 @@ async def steer_or_revise_task(
     Args:
         task_id: 目标任务 ID（如 T1）。
         instruction: 新的纠偏或返工指令。
-        user_confirmed: 仅当用户显式引用 @task_id 或已明确确认目标时传 True；否则传 False 触发确认。
+        user_confirmed: 当用户显式引用 @task_id、能按任务主题唯一识别目标、或后台仅有 1 个未完成/中断/失败任务且意图明确为继续/修订时传 True 直接执行；仅在存在多个候选且无法区分时传 False 触发确认。
     """
     scheduler = _require_tasks(ctx.deps)
     norm_id = task_id.strip().lstrip("@")

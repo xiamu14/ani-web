@@ -35,6 +35,7 @@ from agent.hooks import (
     RouterContextHook,
     RouterSteerHook,
     SemanticRoutingHook,
+    WorkspaceMcpPort,
     sort_capabilities,
 )
 from agent.protocol.event_bus import RuntimeEventBus
@@ -66,9 +67,14 @@ DEFAULT_ROUTER_INSTRUCTIONS = """\
 2. 工作区读写锁与依赖规划：
    - 调度器自动对同目录（含父子目录重叠）执行读写锁：`coder`/`tester` 为写锁（exclusive），`researcher`/`reviewer` 为共享读锁（shared），只读任务之间自动并发、写锁与读写均互斥防饥饿。
    - 若用户明确要求先后顺序（如“先让 coder 改完再让 researcher 总结”），请先派发前置任务拿到 `@task_id`，再传 `depends_on=["T1"]` 派发后续任务；需要了解当前锁占用时可调用 `inspect_workspace_locks`。
-3. 工作区管理：当用户提及具体目录或项目路径时，调用 `set_workspace` 绑定当前会话工作区。
+3. 工作区管理与能力目录：当用户提及具体目录或项目路径时，调用 `set_workspace` 绑定当前会话工作区。MCP 工具与 Skills 按当前工作区动态挂载在后台 Role Agent 上，Router 自身不直接持有其 Tool Schema；请求末尾的 `<workspace_capabilities>` 列出了当前工作区可用的 MCP 与 Skill 轻目录。用户引用 `@mcp:<name>` 或 Skill 时，对照 `<workspace_capabilities>` 确认存在后直接通过 `dispatch_role_agent` 派发给对应 Role（如 `researcher`/`coder`）执行，若目录中确实不存在再如实提示。
 4. @task_id 三级消歧与上下游失败处理：
-   - 对后台任务执行 `steer_or_revise_task` 或 `cancel_task` 时：用户显式引用 @T1 等 ID 时传 `user_confirmed=True` 直接执行；未引用但能唯一推断目标时先传 `user_confirmed=False` 触发确认；存在多个候选时先 `list_tasks` 请用户选择。
+   - 对后台任务执行 `steer_or_revise_task` 时：
+     a) 用户显式引用 `@T1` 等 ID，传 `user_confirmed=True` 直接执行；
+     b) 能根据任务主题/目标（mandate/role/work_path）**明确唯一识别**目标任务时，无需 `ask_user_question`，直接传 `user_confirmed=True` 执行；
+     c) 后台**唯一存在 1 个**未完成/失败/中断任务（`running`/`queued`/`failed`/`interrupted`）且用户意图明确为继续、重试或追加修订时，无需 `ask_user_question`，直接传 `user_confirmed=True` 执行；
+     d) 仅当存在多个候选任务且主题无法明确区分时，才先 `list_tasks` 或用 `ask_user_question` 请用户选择。
+   - 对后台任务执行破坏性的 `cancel_task` 时：用户显式引用 `@T1` 等 ID 传 `user_confirmed=True` 直接执行；未显式引用时先传 `user_confirmed=False`（或 `ask_user_question`）触发确认。
    - 若上游任务 `failed` / `interrupted`，下游依赖任务保持 `queued` 等待；禁止绕过下游或替用户自动重跑，只能引导用户对上游执行 `steer_or_revise_task`（修正重试）或 `cancel_task`（取消上游并自动放行下游）。
 """
 
@@ -116,6 +122,7 @@ class SuperAgentRouter:
         event_bus: RuntimeEventBus | None = None,
         interaction_broker: InteractionBroker | None = None,
         attachment_registry: AttachmentRegistryPort | None = None,
+        mcp_manager: WorkspaceMcpPort | None = None,
         extra_capabilities: Sequence[AbstractCapability[RouterDeps]] = (),
     ) -> None:
         self._context_tree: ContextTreeManager = context_tree
@@ -137,7 +144,7 @@ class SuperAgentRouter:
         )
 
         capabilities: list[AbstractCapability[RouterDeps]] = [
-            RouterContextHook(self._pending_events, self._context_tree),
+            RouterContextHook(self._pending_events, self._context_tree, mcp_manager=mcp_manager),
             RouterSteerHook(self._steer_queues),
             cast(
                 AbstractCapability[RouterDeps],
@@ -313,7 +320,7 @@ class SuperAgentRouter:
                         conversation_id=target_id, role_name="router", run_id=effective_run_id,
                     )
                 return RouterReply(conversation_id=target_id, output="", run_id=effective_run_id, interrupted=True)
-            except (AgentRunError, ModelAPIError, UsageLimitExceeded, TimeoutError) as exc:
+            except Exception as exc:
                 if self._event_bus is not None:
                     _ = self._event_bus.publish(
                         "run.failed",

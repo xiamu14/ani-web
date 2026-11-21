@@ -143,6 +143,15 @@ from agent.protocol.models import (
     VerifiedCitationView,
     WorkspaceLockView,
 )
+from agent.protocol.models_base import (
+    McpServerView,
+    McpsListView,
+    McpToolPolicyView,
+    SkillScopeLiteral,
+    SkillsListView,
+    SkillView,
+    SkippedSkillView,
+)
 from agent.protocol.schema_export import (
     build_events_json_schema,
     write_events_schema_file,
@@ -217,6 +226,9 @@ __all__ = [
     "LocalAttachmentRequest",
     "McpElicitationPayloadView",
     "McpElicitationRespondPayload",
+    "McpServerView",
+    "McpToolPolicyView",
+    "McpsListView",
     "MessagePartDeltaEvent",
     "MessagePartDeltaPayload",
     "MessagePartEndEvent",
@@ -246,6 +258,10 @@ __all__ = [
     "RuntimeSnapshotView",
     "SendMessageReceipt",
     "SendMessageRequest",
+    "SkillScopeLiteral",
+    "SkillView",
+    "SkillsListView",
+    "SkippedSkillView",
     "StreamResyncRequiredEvent",
     "StreamResyncRequiredPayload",
     "StrictProtocolModel",

@@ -274,6 +274,26 @@
           }
         }
       }
+    },
+    "/v1/skills": {
+      "get": {
+        "operationId": "get_get_skills_endpoint",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/mcps": {
+      "get": {
+        "operationId": "get_get_mcps_endpoint",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1231,6 +1251,178 @@
         "title": "McpElicitationPayloadView",
         "type": "object"
       },
+      "McpServerView": {
+        "additionalProperties": false,
+        "description": "已配置 MCP Server 的脱敏状态与工具策略视图。",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          },
+          "transport": {
+            "title": "Transport",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Description"
+          },
+          "command": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Command"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Url"
+          },
+          "roles": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Roles"
+          },
+          "defer_loading": {
+            "default": false,
+            "title": "Defer Loading",
+            "type": "boolean"
+          },
+          "blocked": {
+            "default": false,
+            "title": "Blocked",
+            "type": "boolean"
+          },
+          "compile_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Compile Status"
+          },
+          "compile_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Compile Error"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/McpToolPolicyView"
+            },
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "scope",
+          "transport"
+        ],
+        "title": "McpServerView",
+        "type": "object"
+      },
+      "McpToolPolicyView": {
+        "additionalProperties": false,
+        "description": "单个 MCP 工具的静态权限策略视图。",
+        "properties": {
+          "tool_name": {
+            "title": "Tool Name",
+            "type": "string"
+          },
+          "prefixed_tool_name": {
+            "title": "Prefixed Tool Name",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "lock_mode": {
+            "title": "Lock Mode",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool_name",
+          "prefixed_tool_name",
+          "level",
+          "lock_mode"
+        ],
+        "title": "McpToolPolicyView",
+        "type": "object"
+      },
+      "McpsListView": {
+        "additionalProperties": false,
+        "description": "已配置的 MCP Servers 汇总视图。",
+        "properties": {
+          "servers": {
+            "items": {
+              "$ref": "#/components/schemas/McpServerView"
+            },
+            "title": "Servers",
+            "type": "array"
+          },
+          "total_jev_calls": {
+            "default": 0,
+            "title": "Total Jev Calls",
+            "type": "integer"
+          }
+        },
+        "title": "McpsListView",
+        "type": "object"
+      },
       "PoolStatsView": {
         "additionalProperties": false,
         "description": "单个 LLM 限流池水位。",
@@ -1572,6 +1764,127 @@
           "text"
         ],
         "title": "SendMessageRequest",
+        "type": "object"
+      },
+      "SkillView": {
+        "additionalProperties": false,
+        "description": "已发现并仲裁生效的单个 Skill 元数据视图。",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "when_to_use": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "When To Use"
+          },
+          "scope": {
+            "enum": [
+              "workspace",
+              "global",
+              "builtin"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "directory": {
+            "title": "Directory",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "model_invocable": {
+            "default": true,
+            "title": "Model Invocable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "scope",
+          "version",
+          "directory",
+          "path"
+        ],
+        "title": "SkillView",
+        "type": "object"
+      },
+      "SkillsListView": {
+        "additionalProperties": false,
+        "description": "当前工作区/全局可见 Skills 清单。",
+        "properties": {
+          "work_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Work Path"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/SkillView"
+            },
+            "title": "Skills",
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/SkippedSkillView"
+            },
+            "title": "Skipped",
+            "type": "array"
+          }
+        },
+        "title": "SkillsListView",
+        "type": "object"
+      },
+      "SkippedSkillView": {
+        "additionalProperties": false,
+        "description": "因同名仲裁或校验被跳过的 Skill 记录。",
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "reason",
+          "message"
+        ],
+        "title": "SkippedSkillView",
         "type": "object"
       },
       "TaskView": {

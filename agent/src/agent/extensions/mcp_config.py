@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, cast
@@ -384,3 +384,28 @@ def load_mcp_configs(
         workspace_config=_read_json_file(resolved_workspace),
         environ=environ,
     )
+
+
+def merge_workspace_mcp_specs(
+    base_specs: Sequence[McpServerSpec],
+    base_prefixes: Sequence[str],
+    work_path: str | Path | None,
+) -> tuple[tuple[McpServerSpec, ...], tuple[str, ...]]:
+    """按任务工作区动态合并 `<work_path>/.agent/mcp.json` 与启动期全局 MCP 配置。"""
+    if not work_path:
+        return tuple(base_specs), tuple(base_prefixes)
+    by_name: dict[str, McpServerSpec] = {s.name: s for s in base_specs}
+    try:
+        loaded = load_mcp_configs(workspace_root=Path(work_path).expanduser().resolve())
+        for spec in loaded.servers:
+            by_name[spec.name] = spec
+    except (OSError, ValueError):
+        pass
+    specs = tuple(by_name.values())
+    prefixes: set[str] = set(base_prefixes)
+    for spec in specs:
+        if isinstance(spec.tool_prefix, str) and spec.tool_prefix:
+            prefixes.add(spec.tool_prefix)
+        elif spec.tool_prefix is not False:
+            prefixes.add(f"mcp_{spec.name}_")
+    return specs, tuple(sorted(prefixes))

@@ -256,3 +256,69 @@ class RecoveredBranchView(StrictProtocolModel):
     main_conversation_id: str
     interrupted_task_ids: list[str] = Field(default_factory=list)
     requeued_task_ids: list[str] = Field(default_factory=list)
+
+
+SkillScopeLiteral = Literal["workspace", "global", "builtin"]
+
+
+class SkillView(StrictProtocolModel):
+    """已发现并仲裁生效的单个 Skill 元数据视图。"""
+
+    name: str
+    description: str
+    when_to_use: str | None = None
+    scope: SkillScopeLiteral
+    version: str
+    directory: str
+    path: str
+    model_invocable: bool = True
+
+
+class SkippedSkillView(StrictProtocolModel):
+    """因同名仲裁或校验被跳过的 Skill 记录。"""
+
+    path: str
+    reason: str
+    message: str
+
+
+class SkillsListView(StrictProtocolModel):
+    """当前工作区/全局可见 Skills 清单。"""
+
+    work_path: str | None = None
+    skills: list[SkillView] = Field(default_factory=list)
+    skipped: list[SkippedSkillView] = Field(default_factory=list)
+
+
+class McpToolPolicyView(StrictProtocolModel):
+    """单个 MCP 工具的静态权限策略视图。"""
+
+    tool_name: str
+    prefixed_tool_name: str
+    level: str
+    lock_mode: str
+    reason: str = ""
+
+
+class McpServerView(StrictProtocolModel):
+    """已配置 MCP Server 的脱敏状态与工具策略视图。"""
+
+    name: str
+    scope: str
+    transport: str
+    description: str | None = None
+    command: str | None = None
+    url: str | None = None
+    roles: list[str] | None = None
+    defer_loading: bool = False
+    blocked: bool = False
+    compile_status: str | None = None
+    compile_error: str | None = None
+    tools: list[McpToolPolicyView] = Field(default_factory=list)
+
+
+class McpsListView(StrictProtocolModel):
+    """已配置的 MCP Servers 汇总视图。"""
+
+    servers: list[McpServerView] = Field(default_factory=list)
+    total_jev_calls: int = 0

@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from agent.attachments import AttachmentRegistry
 from agent.config import LlmSettings, load_settings
 from agent.context import ContextTreeManager, JevDecisionClient, SemanticBranchRouter
+from agent.core.mcp_workspace import WorkspaceMcpManager
 from agent.core.model import build_model
 from agent.core.roles import (
     RoleRegistry,
@@ -44,7 +45,7 @@ from agent.extensions import (
     FastMcpProbeAdapter,
     LocalOAuthReadinessChecker,
     McpElicitationHandler,
-    load_mcp_configs,
+    McpServerSpec,
 )
 from agent.llm import LlmConcurrencyController
 from agent.permissions import (
@@ -54,6 +55,7 @@ from agent.permissions import (
     McpCompileReport,
     McpPolicyCompiler,
     McpProbePort,
+    McpToolPolicy,
     PermissionReviewer,
     ProbedMcpServer,
     ProbedMcpTool,
@@ -166,6 +168,10 @@ class SuperAgentRuntime:
     protocol_store: SQLModelProtocolStore | None = None
     recovery_summary: dict[str, tuple[list[str], list[str]]] = field(default_factory=dict)
     mcp_compile_report: McpCompileReport | None = None
+    mcp_specs: tuple[McpServerSpec, ...] = ()
+    mcp_policies: Mapping[str, McpToolPolicy] = field(default_factory=lambda: cast(dict[str, McpToolPolicy], {}))
+    mcp_blocked_servers: frozenset[str] = frozenset()
+    mcp_manager: WorkspaceMcpManager | None = None
 
     async def inspect_context(self, conversation_id: str) -> ContextSnapshot:
         """读取真实持久化记录与当前 Context Window 内容。"""
@@ -322,10 +328,6 @@ async def open_runtime(
     router_model = effective_llm_ctrl.wrap_router_model(raw_model)
     roles = role_registry if role_registry is not None else build_default_role_registry(role_model)
 
-    merged_mcp = load_mcp_configs(
-        global_path=Path(global_mcp_path) if global_mcp_path is not None else None,
-        workspace_root=Path(mcp_workspace_root) if mcp_workspace_root is not None else None,
-    )
     mcp_store = SQLModelMcpPolicyStore(engine, session_factory=sessions)
     effective_classifier: McpClassifierPort
     if mcp_classifier is not None:
@@ -341,15 +343,14 @@ async def open_runtime(
         store=mcp_store,
         auth_readiness=LocalOAuthReadinessChecker(token_root=mcp_token_root),
     )
-    mcp_compile_report = await mcp_compiler.compile_all(merged_mcp.servers)
-    mcp_policy_index = {p.prefixed_tool_name: p for p in mcp_compile_report.policies}
-    reviewer.set_mcp_policies(mcp_policy_index)
-    mcp_blocked_servers = frozenset(
-        entry.server_name
-        for entry in mcp_compile_report.entries
-        if entry.status in ("auth_required", "error")
+    mcp_manager = WorkspaceMcpManager(
+        compiler=mcp_compiler, reviewer=reviewer,
+        global_mcp_path=Path(global_mcp_path) if global_mcp_path is not None else None,
     )
-    mcp_prefixes = tuple(spec.name for spec in merged_mcp.servers)
+    startup_mcp = await mcp_manager.ensure_compiled(mcp_workspace_root)
+    mcp_compile_report, mcp_policy_index, mcp_blocked_servers, mcp_prefixes = (
+        startup_mcp.report, startup_mcp.policies, startup_mcp.blocked_servers, startup_mcp.prefixes
+    )
 
     eff_elicitation = (
         elicitation_handler
@@ -379,9 +380,10 @@ async def open_runtime(
     role_sessions = RoleSessionManager(conversation_store=store, ticket_index=ticket_store)
     scheduler = WorkspaceLockManager(
         roles=roles, sessions=role_sessions, ticket_store=ticket_store, step_store=step_store,
-        permission_reviewer=reviewer, tool_coordinator=coordinator, mcp_specs=merged_mcp.servers,
+        permission_reviewer=reviewer, tool_coordinator=coordinator, mcp_specs=startup_mcp.specs,
         mcp_policies=mcp_policy_index, mcp_blocked_servers=mcp_blocked_servers, mcp_prefixes=mcp_prefixes,
         mcp_token_root=mcp_token_root, elicitation_handler=eff_elicitation, mcp_http_client=mcp_http_client,
+        mcp_manager=mcp_manager,
         memory_store=memory_store, llm_controller=effective_llm_ctrl, attachment_registry=effective_registry,
         event_bus=eff_bus, interaction_broker=eff_broker,
         extra_role_capabilities_factory=_role_extra_caps if eff_bus is not None else None,
@@ -406,6 +408,7 @@ async def open_runtime(
         task_dispatcher=task_dispatcher if task_dispatcher is not None else scheduler,
         step_store=step_store, semantic_router=semantic_router, tool_coordinator=coordinator,
         event_bus=eff_bus, interaction_broker=eff_broker, attachment_registry=effective_registry,
+        mcp_manager=mcp_manager,
         extra_capabilities=router_extra_caps,
     )
     recovery_summary: dict[str, tuple[list[str], list[str]]] = {}
@@ -453,7 +456,9 @@ async def open_runtime(
             attachment_registry=effective_registry, scheduler=scheduler, router=router,
             logfire_enabled=logfire_enabled, event_bus=eff_bus, interaction_broker=eff_broker,
             protocol_store=protocol_store, recovery_summary=recovery_summary,
-            mcp_compile_report=mcp_compile_report,
+            mcp_compile_report=mcp_compile_report, mcp_specs=startup_mcp.specs,
+            mcp_policies=mcp_policy_index, mcp_blocked_servers=mcp_blocked_servers,
+            mcp_manager=mcp_manager,
         )
     finally:
         if eff_broker is not None:

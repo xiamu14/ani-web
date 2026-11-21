@@ -116,8 +116,10 @@ def select_mcp_capabilities_for_role(
     for spec in specs:
         if spec.name in blocked_servers:
             continue
-        allowed_roles = set(spec.roles) if spec.roles is not None else rec_by_server.get(spec.name, set())
-        if role_name not in allowed_roles:
+        if spec.roles is not None:
+            if role_name not in spec.roles:
+                continue
+        elif spec.name in rec_by_server and role_name not in rec_by_server[spec.name]:
             continue
         caps.append(
             build_mcp_capability(

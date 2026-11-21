@@ -15,6 +15,7 @@ from agent.hooks.priority import (
 from agent.hooks.router_hooks import (
     RouterContextHook,
     RouterSteerHook,
+    WorkspaceMcpPort,
     WorkspacePromptPort,
 )
 from agent.hooks.semantic_hook import SemanticRoutingHook
@@ -32,6 +33,7 @@ __all__ = [
     "RouterSteerHook",
     "SemanticRoutingHook",
     "TaskSteerHook",
+    "WorkspaceMcpPort",
     "WorkspacePromptPort",
     "canonicalize_tool_args",
     "get_capability_priority",

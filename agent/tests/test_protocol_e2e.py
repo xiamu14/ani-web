@@ -204,6 +204,8 @@ class TestStep126E2EAndSchemas(unittest.IsolatedAsyncioTestCase):
             "/v1/attachments/{att_id}/content",
             "/v1/conversations/{cid}/context",
             "/v1/conversations/{cid}/usage",
+            "/v1/skills",
+            "/v1/mcps",
         ):
             self.assertIn(expected_path, paths)
 
@@ -588,6 +590,16 @@ class TestStep126E2EAndSchemas(unittest.IsolatedAsyncioTestCase):
                             f"/v1/conversations/{cid}/usage", headers=headers
                         )
                         self.assertEqual(usage_resp.status_code, 200)
+
+                        skills_resp = await client.get("/v1/skills", headers=headers)
+                        self.assertEqual(skills_resp.status_code, 200)
+                        skills_data = cast(dict[str, object], skills_resp.json())
+                        self.assertIn("skills", skills_data)
+
+                        mcps_resp = await client.get("/v1/mcps", headers=headers)
+                        self.assertEqual(mcps_resp.status_code, 200)
+                        mcps_data = cast(dict[str, object], mcps_resp.json())
+                        self.assertIn("servers", mcps_data)
 
                         # 确认 SSE 全程捕获关键事件类型
                         event_types = {cast(str, e.get("type", "")) for e in sse_events}
