@@ -68,6 +68,10 @@ class WorkspaceMcpManager:
         hit = self._cache.get(key)
         return hit[1] if hit is not None else None
 
+    def invalidate(self, work_path: str | Path | None = None) -> None:
+        key = str(Path(work_path).expanduser().resolve()) if work_path else ""
+        _ = self._cache.pop(key, None)
+
     async def ensure_compiled(
         self, work_path: str | Path | None = None
     ) -> WorkspaceMcpSnapshot:

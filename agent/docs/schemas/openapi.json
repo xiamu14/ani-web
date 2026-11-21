@@ -294,6 +294,16 @@
           }
         }
       }
+    },
+    "/v1/mcps/{name}/auth": {
+      "post": {
+        "operationId": "post_auth_mcp_endpoint",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
     }
   },
   "components": {

@@ -9,6 +9,7 @@ from starlette.responses import Response
 from starlette.routing import Route
 
 from agent.core.budget import ROUTER_BUDGET_POLICY
+from agent.extensions import build_mcp_toolset, clear_oauth_cache
 from agent.extensions.mcp_config import load_mcp_configs
 from agent.extensions.skill_resolver import SkillCatalogResolver, SkillScope
 from agent.protocol import (
@@ -201,10 +202,86 @@ async def get_mcps_endpoint(request: Request) -> Response:
     )
 
 
+async def auth_mcp_endpoint(request: Request) -> Response:
+    """显式触发指定 OAuth MCP Server 的受控浏览器授权并刷新工作区编译快照。"""
+    name = path_param(request, "name")
+    rt = get_state(request).runtime
+    work_path = request.query_params.get("work_path")
+    if work_path is None:
+        cid = request.query_params.get("conversation_id") or rt.context_tree.active_conversation_id
+        if cid:
+            work_path = await rt.store.get_work_path(cid)
+    ws_root = Path(work_path).expanduser().resolve() if work_path else None
+    merged = load_mcp_configs(workspace_root=ws_root)
+    spec = next((s for s in merged.servers if s.name == name), None)
+    if spec is None:
+        return json_error(
+            request, status_code=404, code="NOT_FOUND", message=f"MCP server {name!r} not found."
+        )
+    if spec.auth.type != "oauth":
+        return json_error(
+            request,
+            status_code=400,
+            code="INVALID_ARGUMENT",
+            message=f"MCP server {name!r} auth type is {spec.auth.type!r}, not 'oauth'.",
+        )
+    clear_oauth_cache(spec, clear_client_info=True)
+    toolset = build_mcp_toolset(spec, interactive=True)
+    async with toolset:
+        _ = await toolset.list_tools()
+
+    if rt.mcp_manager is not None:
+        rt.mcp_manager.invalidate(work_path)
+        snap = await rt.mcp_manager.ensure_compiled(work_path)
+        comp = next((e for e in snap.report.entries if e.server_name == name), None)
+        tools = [
+            McpToolPolicyView(
+                tool_name=p.tool_name,
+                prefixed_tool_name=p.prefixed_tool_name,
+                level=str(p.level),
+                lock_mode=str(p.lock_mode),
+                reason=p.reason,
+            )
+            for p in snap.policies.values()
+            if p.server_name == name
+        ]
+        return json_model(
+            McpServerView(
+                name=spec.name,
+                scope=spec.scope,
+                transport=spec.transport,
+                description=spec.description,
+                command=spec.command,
+                url=spec.url,
+                roles=list(spec.roles) if spec.roles is not None else None,
+                defer_loading=spec.defer_loading,
+                blocked=spec.name in snap.blocked_servers,
+                compile_status=comp.status if comp is not None else None,
+                compile_error=comp.error if comp is not None and comp.error else None,
+                tools=tools,
+            )
+        )
+    return json_model(
+        McpServerView(
+            name=spec.name,
+            scope=spec.scope,
+            transport=spec.transport,
+            description=spec.description,
+            command=spec.command,
+            url=spec.url,
+            roles=list(spec.roles) if spec.roles is not None else None,
+            defer_loading=spec.defer_loading,
+            blocked=False,
+            compile_status="compiled",
+        )
+    )
+
+
 def get_telemetry_routes() -> list[Route]:
     return [
         Route("/v1/conversations/{cid}/context", get_context_endpoint, methods=["GET"]),
         Route("/v1/conversations/{cid}/usage", get_usage_endpoint, methods=["GET"]),
         Route("/v1/skills", get_skills_endpoint, methods=["GET"]),
         Route("/v1/mcps", get_mcps_endpoint, methods=["GET"]),
+        Route("/v1/mcps/{name}/auth", auth_mcp_endpoint, methods=["POST"]),
     ]

@@ -5,7 +5,9 @@ from agent.extensions.mcp_auth import (
     LocalOAuthReadinessChecker,
     build_fastmcp_auth,
     build_token_storage,
+    clear_oauth_cache,
     has_persisted_oauth_files,
+    resolve_oauth_callback_port,
     token_namespace_dir,
 )
 from agent.extensions.mcp_config import (
@@ -83,6 +85,7 @@ __all__ = [
     "build_skills_capability",
     "build_token_storage",
     "build_tool_search_capabilities",
+    "clear_oauth_cache",
     "compute_endpoint_fingerprint",
     "compute_tool_schema_hash",
     "expand_env_vars",
@@ -91,6 +94,7 @@ __all__ = [
     "merge_mcp_configs",
     "merge_workspace_mcp_specs",
     "parse_semver",
+    "resolve_oauth_callback_port",
     "select_mcp_capabilities_for_role",
     "token_namespace_dir",
 ]

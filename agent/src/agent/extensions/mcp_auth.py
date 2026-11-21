@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import socket
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast, override
 
 from cryptography.fernet import Fernet
 from fastmcp.client.auth import BearerAuth, ClientCredentialsOAuthProvider, OAuth
@@ -56,6 +59,86 @@ def build_token_storage(
     return store
 
 
+def _extract_expires_at(ns_dir: Path) -> float | None:
+    for p in ns_dir.rglob("*.json"):
+        if "token_expiry" not in p.name:
+            continue
+        try:
+            raw = cast(object, json.loads(p.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            continue
+        if isinstance(raw, dict):
+            d = cast(dict[str, object], raw)
+            val = d.get("value")
+            target = cast(dict[str, object], val) if isinstance(val, dict) else d
+            exp = target.get("expires_at")
+            if isinstance(exp, (int, float)):
+                return float(exp)
+    return None
+
+
+def _is_port_available(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+
+
+def resolve_oauth_callback_port(
+    spec: McpServerSpec, *, token_root: Path | None = None
+) -> int:
+    """为 OAuth 回调解析稳定端口，避免随机端口导致旧 client_id 的 redirect_uri 失配。"""
+    if spec.auth.callback_port is not None:
+        return spec.auth.callback_port
+    ns_dir = token_namespace_dir(spec, token_root=token_root)
+    if ns_dir.is_dir():
+        for p in ns_dir.rglob("*.json"):
+            if "client_info" not in p.name or p.name.endswith("-info.json"):
+                continue
+            try:
+                raw = cast(object, json.loads(p.read_text(encoding="utf-8")))
+                if isinstance(raw, dict):
+                    d = cast(dict[str, object], raw)
+                    v = d.get("value")
+                    info = cast(dict[str, object], v) if isinstance(v, dict) else d
+                    uris = info.get("redirect_uris")
+                    if isinstance(uris, list) and uris:
+                        m = re.search(r":(\d+)/", str(uris[0]))
+                        if m:
+                            port = int(m.group(1))
+                            if _is_port_available(port):
+                                return port
+            except (OSError, ValueError):
+                pass
+    seed = int((spec.endpoint_fingerprint or spec.name)[:8], 16) if spec.endpoint_fingerprint else 0
+    candidate = 49152 + (seed % 10000)
+    for offset in range(20):
+        if _is_port_available(candidate + offset):
+            return candidate + offset
+    return 0
+
+
+def clear_oauth_cache(
+    spec: McpServerSpec,
+    *,
+    token_root: Path | None = None,
+    clear_client_info: bool = True,
+) -> None:
+    """清理过期 Token 及失效的动态注册 client_info，避免旧 redirect_uri 死循环。"""
+    ns_dir = token_namespace_dir(spec, token_root=token_root)
+    if not ns_dir.is_dir():
+        return
+    for p in list(ns_dir.rglob("*.json")):
+        if not clear_client_info and "client_info" in p.name:
+            continue
+        try:
+            p.unlink()
+        except OSError:
+            pass
+
+
 def has_persisted_oauth_files(spec: McpServerSpec, *, token_root: Path | None = None) -> bool:
     """无阻塞检查本地是否已落盘该 Server 的 OAuth 凭据文件。"""
     ns_dir = token_namespace_dir(spec, token_root=token_root)
@@ -65,7 +148,7 @@ def has_persisted_oauth_files(spec: McpServerSpec, *, token_root: Path | None = 
 
 
 class LocalOAuthReadinessChecker:
-    """检查 OAuth Server 是否可无头连接（实现 McpAuthReadinessPort）。"""
+    """检查 OAuth Server 是否可无头连接（含过期校验，绝不在后台阻塞等待浏览器）。"""
 
     def __init__(self, *, token_root: Path | None = None) -> None:
         self._token_root: Path | None = token_root
@@ -73,7 +156,21 @@ class LocalOAuthReadinessChecker:
     async def is_ready(self, spec: McpServerSpec) -> bool:
         if spec.auth.type != "oauth":
             return True
-        return has_persisted_oauth_files(spec, token_root=self._token_root)
+        if not has_persisted_oauth_files(spec, token_root=self._token_root):
+            return False
+        ns_dir = token_namespace_dir(spec, token_root=self._token_root)
+        expires_at = _extract_expires_at(ns_dir)
+        return expires_at is None or expires_at > time.time() + 30.0
+
+
+class _HeadlessOAuth(OAuth):
+    """后台无头模式下禁止静默弹浏览器，未授权/过期直接快速失败。"""
+
+    @override
+    async def redirect_handler(self, authorization_url: str) -> None:
+        raise RuntimeError(
+            f"OAuth authorization required (headless mode): {authorization_url}"
+        )
 
 
 def build_fastmcp_auth(
@@ -81,6 +178,7 @@ def build_fastmcp_auth(
     *,
     token_root: Path | None = None,
     encryption_key: str | bytes | None = None,
+    interactive: bool = False,
 ) -> Any:
     """将 McpAuthSpec 映射为 fastmcp.client.auth 或 BearerAuth 实例。"""
     auth = spec.auth
@@ -93,11 +191,14 @@ def build_fastmcp_auth(
     if auth.type == "oauth":
         storage = build_token_storage(spec, token_root=token_root, encryption_key=encryption_key)
         scopes = list(auth.scopes) if auth.scopes else None
-        return OAuth(
+        cb_port = resolve_oauth_callback_port(spec, token_root=token_root)
+        oauth_cls = OAuth if interactive else _HeadlessOAuth
+        return oauth_cls(
             mcp_url=spec.url,
             scopes=scopes,
             token_storage=storage,
-            callback_port=auth.callback_port,
+            callback_port=cb_port or None,
+            callback_timeout=180.0,
             client_metadata_url=auth.client_metadata_url,
             client_id=auth.client_id,
             client_secret=auth.client_secret,

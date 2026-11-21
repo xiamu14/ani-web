@@ -28,6 +28,7 @@ def build_mcp_toolset(
     elicitation_handler: McpElicitationHandler | None = None,
     sampling_model: Model | None = None,
     http_client: AsyncHTTPClient | None = None,
+    interactive: bool = False,
 ) -> MCPToolset[object]:
     """根据 McpServerSpec 构建配置完整的 MCPToolset（支持 stdio/http/sse 与完整 Auth）。"""
     if spec.transport == "stdio":
@@ -49,7 +50,9 @@ def build_mcp_toolset(
 
     if not spec.url:
         raise ValueError(f"MCP HTTP/SSE server {spec.name!r} missing `url`")
-    auth = build_fastmcp_auth(spec, token_root=token_root, encryption_key=encryption_key)
+    auth = build_fastmcp_auth(
+        spec, token_root=token_root, encryption_key=encryption_key, interactive=interactive
+    )
     headers = dict(spec.headers) if spec.headers else None
     effective_http_client = http_client if headers is None else None
     return MCPToolset(
