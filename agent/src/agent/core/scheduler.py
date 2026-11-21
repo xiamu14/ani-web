@@ -396,7 +396,7 @@ class WorkspaceLockManager:
                     result = await agent.run(
                         prompt_text, conversation=role_conv, workspace=workspace,
                         run_id=worker_run_id, cancellation_token=cancel_token, event_stream_handler=stream_handler,
-                        usage_limits=policy.to_usage_limits(), timeout=policy.wall_clock_timeout_sec,
+                        usage_limits=policy.to_usage_limits(base_usage=role_conv.usage), timeout=policy.wall_clock_timeout_sec,
                     )
                 await self._sessions.save_task_result(main_conversation_id, result)
                 verdict = evaluate_task_outcome(result.output, trace=trace, role_name=role.name)

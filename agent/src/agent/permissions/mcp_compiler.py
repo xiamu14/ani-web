@@ -40,23 +40,6 @@ def compute_prefixed_tool_name(spec: McpServerSpec, tool_name: str) -> str:
     return tool_name
 
 
-def _fallback_decision(tool_name: str, reason: str) -> McpClassifiedDecision:
-    return McpClassifiedDecision(
-        tool_name=tool_name,
-        level="review",
-        lock_mode="exclusive",
-        recommended_roles=("coder",),
-        reason=reason,
-    )
-
-
-def _normalize_roles(raw_roles: object) -> tuple[str, ...]:
-    if not isinstance(raw_roles, list):
-        return ("coder",)
-    cleaned = tuple(str(r).strip() for r in raw_roles if str(r).strip() in _VALID_ROLES)
-    return cleaned or ("coder",)
-
-
 class JevMcpClassifier:
     """使用 Jev (/alpha/decisions) 对增量 MCP 工具执行一次性批量静态定级。"""
 
@@ -109,8 +92,9 @@ class JevMcpClassifier:
                 "type": "choice",
                 "instructions": f"Assign suitable roles for MCP tool `{tool.name}`.",
                 "criteria": {
-                    "readonly_all": "Read-only research/query tool suitable for researcher, reviewer, coder, tester.",
-                    "dev_only": "Mutating/build/write tool suitable only for coder and tester.",
+                    "research_only": "Read-only literature/web/external research tool suitable for researcher and reviewer.",
+                    "readonly_dev": "Read-only code/docs/repo inspection tool suitable for researcher, reviewer, and coder.",
+                    "dev_only": "Mutating/build/test/write tool suitable only for coder and tester.",
                     "admin_none": "Forbidden or unsafe tool; assign to no role.",
                 },
             }
@@ -122,17 +106,18 @@ class JevMcpClassifier:
                 span_attrs={"mcp.server_name": server.server_name, "mcp.tool_count": len(tools)},
             )
         except (httpx.HTTPError, TimeoutError, ValueError, KeyError, TypeError, RuntimeError) as exc:
-            logfire.warning(
-                "Jev MCP classification failed; falling back to review+exclusive",
+            logfire.error(
+                "Jev MCP classification failed; failing closed without default roles",
                 server_name=server.server_name,
                 error=str(exc),
             )
-            return [_fallback_decision(t.name, f"Jev fallback: {exc}") for t in tools]
+            raise RuntimeError(f"Jev classification failed: {exc}") from exc
 
         answers_raw = resp.get("answers", resp.get("decisions", resp))
         answers_map = cast(dict[str, object], answers_raw) if isinstance(answers_raw, dict) else {}
         role_group_map: dict[str, tuple[str, ...]] = {
-            "readonly_all": ("researcher", "reviewer", "coder", "tester"),
+            "research_only": ("researcher", "reviewer"),
+            "readonly_dev": ("researcher", "reviewer", "coder"),
             "dev_only": ("coder", "tester"),
             "admin_none": (),
         }
@@ -150,16 +135,20 @@ class JevMcpClassifier:
         results: list[McpClassifiedDecision] = []
         for tool in tools:
             raw_level = _extract_choice(f"{tool.name}__level")
-            raw_lock = _extract_choice(f"{tool.name}__lock_mode") or "exclusive"
-            raw_role_group = _extract_choice(f"{tool.name}__role_group") or "dev_only"
-            if raw_level is None:
-                results.append(_fallback_decision(tool.name, "Jev omitted tool decision"))
-                continue
-            level: RuleLevel = cast(RuleLevel, raw_level) if raw_level in _VALID_LEVELS else "review"
-            lock_mode: LockMode = (
-                cast(LockMode, raw_lock) if raw_lock in _VALID_LOCK_MODES else "exclusive"
-            )
-            roles = role_group_map.get(raw_role_group, ("coder",))
+            raw_lock = _extract_choice(f"{tool.name}__lock_mode")
+            raw_role_group = _extract_choice(f"{tool.name}__role_group")
+            if (
+                raw_level not in _VALID_LEVELS
+                or raw_lock not in _VALID_LOCK_MODES
+                or raw_role_group not in role_group_map
+            ):
+                raise ValueError(
+                    f"Jev returned invalid/incomplete decision for `{tool.name}`: "
+                    + f"level={raw_level!r}, lock={raw_lock!r}, role_group={raw_role_group!r}"
+                )
+            level = cast(RuleLevel, raw_level)
+            lock_mode = cast(LockMode, raw_lock)
+            roles = role_group_map[raw_role_group]
             results.append(
                 McpClassifiedDecision(
                     tool_name=tool.name,
@@ -235,7 +224,17 @@ class McpPolicyCompiler:
         classified_by_tool: dict[str, McpClassifiedDecision] = {}
         if delta_tools:
             jev_calls = 1
-            decisions = await self._classifier.classify(probed, delta_tools)
+            try:
+                decisions = await self._classifier.classify(probed, delta_tools)
+            except (httpx.HTTPError, TimeoutError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+                return McpCompileEntry(
+                    server_name=spec.name,
+                    endpoint_fingerprint=probed.endpoint_fingerprint,
+                    status="error",
+                    policies=(),
+                    jev_calls=jev_calls,
+                    error=str(exc),
+                )
             classified_by_tool = {d.tool_name: d for d in decisions}
 
         final_policies: list[McpToolPolicy] = []
@@ -243,9 +242,16 @@ class McpPolicyCompiler:
             if tool.name in reused:
                 final_policies.append(reused[tool.name])
                 continue
-            decision = classified_by_tool.get(tool.name) or _fallback_decision(
-                tool.name, "Classifier returned no entry"
-            )
+            decision = classified_by_tool.get(tool.name)
+            if decision is None:
+                return McpCompileEntry(
+                    server_name=spec.name,
+                    endpoint_fingerprint=probed.endpoint_fingerprint,
+                    status="error",
+                    policies=(),
+                    jev_calls=jev_calls,
+                    error=f"Classifier omitted decision for tool `{tool.name}`",
+                )
             final_policies.append(
                 McpToolPolicy(
                     server_name=spec.name,

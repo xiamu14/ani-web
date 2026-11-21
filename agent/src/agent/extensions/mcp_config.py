@@ -395,12 +395,9 @@ def merge_workspace_mcp_specs(
     if not work_path:
         return tuple(base_specs), tuple(base_prefixes)
     by_name: dict[str, McpServerSpec] = {s.name: s for s in base_specs}
-    try:
-        loaded = load_mcp_configs(workspace_root=Path(work_path).expanduser().resolve())
-        for spec in loaded.servers:
-            by_name[spec.name] = spec
-    except (OSError, ValueError):
-        pass
+    loaded = load_mcp_configs(workspace_root=Path(work_path).expanduser().resolve())
+    for spec in loaded.servers:
+        by_name[spec.name] = spec
     specs = tuple(by_name.values())
     prefixes: set[str] = set(base_prefixes)
     for spec in specs:

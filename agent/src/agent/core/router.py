@@ -302,7 +302,7 @@ class SuperAgentRouter:
                 result = await self._agent.run(
                     prompt, conversation=latest_conv, deps=deps, run_id=effective_run_id,
                     cancellation_token=cancel_token, event_stream_handler=stream_handler,
-                    usage_limits=self._budget_policy.to_usage_limits(),
+                    usage_limits=self._budget_policy.to_usage_limits(base_usage=latest_conv.usage),
                     timeout=self._budget_policy.wall_clock_timeout_sec,
                 )
             except RunCancelled:
@@ -414,7 +414,7 @@ class SuperAgentRouter:
                     deps=deps,
                     run_id=proactive_run_id,
                     event_stream_handler=stream_handler,
-                    usage_limits=self._budget_policy.to_usage_limits(),
+                    usage_limits=self._budget_policy.to_usage_limits(base_usage=conv.usage),
                     timeout=self._budget_policy.wall_clock_timeout_sec,
                 )
         except (AgentRunError, ModelAPIError, UsageLimitExceeded, TimeoutError) as exc:

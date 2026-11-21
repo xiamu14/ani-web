@@ -56,28 +56,36 @@ async def build_workspace_capabilities_tail(
     for pol in mcp_policies.values():
         rec_by_server.setdefault(pol.server_name, set()).update(pol.recommended_roles)
 
+    skill_error: str | None = None
     try:
         catalog = await SkillCatalogResolver().resolve(work_path=work_path)
         skill_entries = catalog.l1_index()
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
         skill_entries = ()
+        skill_error = str(exc)
 
-    if not mcp_specs and not skill_entries:
+    if not mcp_specs and not skill_entries and skill_error is None:
         return None
 
     lines: list[str] = [f'<workspace_capabilities work_path="{work_path or ""}">']
     if mcp_specs:
         lines.append("  <mcps>")
         for spec in mcp_specs:
-            effective_roles = spec.roles if spec.roles is not None else tuple(sorted(rec_by_server.get(spec.name, ())))
-            roles_attr = ",".join(effective_roles) if effective_roles else "all"
-            st = "blocked" if spec.name in blocked else status_by_name.get(spec.name, "configured")
+            effective_roles = (
+                spec.roles
+                if spec.roles is not None
+                else tuple(sorted(rec_by_server.get(spec.name, ())))
+            )
+            st = "blocked" if spec.name in blocked else status_by_name.get(spec.name, "error")
+            roles_attr = ",".join(effective_roles) if effective_roles and st in ("compiled", "cached") else "none"
             desc = (spec.description or "").replace('"', "'").strip()[:80]
             desc_attr = f' description="{desc}"' if desc else ""
             lines.append(
                 f'    <mcp name="{spec.name}" transport="{spec.transport}" status="{st}" roles="{roles_attr}"{desc_attr} />'
             )
         lines.append("  </mcps>")
+    if skill_error is not None:
+        lines.append(f'  <skills_error message="{skill_error.replace(chr(34), chr(39))[:120]}" />')
     if skill_entries:
         lines.append("  <skills>")
         for sk in skill_entries:

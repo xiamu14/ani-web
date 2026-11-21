@@ -78,17 +78,10 @@ class _FailSafeMcpClassifier:
         server: ProbedMcpServer,
         tools: Sequence[ProbedMcpTool],
     ) -> Sequence[McpClassifiedDecision]:
-        _ = server
-        return [
-            McpClassifiedDecision(
-                tool_name=t.name,
-                level="review",
-                lock_mode="exclusive",
-                recommended_roles=("coder",),
-                reason="No Jev client configured; fail-safe review+exclusive",
-            )
-            for t in tools
-        ]
+        _ = (server, tools)
+        raise RuntimeError(
+            "Jev classifier is not configured (OPENROUTER_API_KEY missing)."
+        )
 
 _observability_state: set[str] = set()
 

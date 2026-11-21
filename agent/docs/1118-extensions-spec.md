@@ -50,7 +50,7 @@
 - **多 Role 共享持有（多对多而非唯一绑定）**：
   - 同一 Tool 集或 MCP Server 可同时挂载给多个合适角色（如 `roles: ["researcher", "coder"]` 或 `["coder", "tester"]`），而非排他性 1:1 唯一绑定；
   - 若用户在某 Server 下显式声明 `"roles": [...]`，按指定角色集合挂载；
-  - 若外部用户未指定 `roles`，在预编译阶段由 `Jev` 产出多选集合 `recommended_roles` 并落盘（纯只读/检索类可同时分派给 `researcher`、`reviewer`、`coder`；含写/变更/构建类仅分派给 `coder`、`tester`）。`Router` 不挂载任何重型 MCP。
+  - 若外部用户未指定 `roles`，在预编译阶段由 `Jev` 产出多选集合 `recommended_roles` 并落盘（纯只读/检索类可同时分派给 `researcher`、`reviewer`、`coder`；含写/变更/构建类仅分派给 `coder`、`tester`）。**严禁使用硬编码默认角色（如 `("coder",)` 或 `"all"`）兜底**：若 `Jev` 无法判断或报错，该 MCP 必须判定为**不可用**（`recommended_roles = ()`，不挂载给任何 Role），并向用户与 Router 明确暴露报错信息。`Router` 不挂载任何重型 MCP。
 - **按需懒连接与多 Role 并发隔离**：Role Worker 运行时按 `role.name in server.roles` 过滤出该角色持有的 `MCPToolset` 子集（工具较多时结合 `ToolSearch` 延迟披露 Schema），每次任务在独立 `async with agent:` 作用域内按需建立并释放连接，连接实例互不干扰、杜绝僵尸子进程。
 - **同用户跨 Role 全工具共享协调（`ToolLockCoordinator`）**：连接隔离不能隔离底层共享状态（不仅是 Postgres/Playwright 等有状态 MCP，也包括本地重叠路径、命令句柄与会话控制工具）。`ToolExecutionQueueHook` 在 `open_runtime` 装配时统一注入同一个进程级 `ToolLockCoordinator` 覆盖**所有工具**（本地文件、`shell`、Router 工具与 MCP 工具）：无状态只读操作（`shared`）跨 Role 并发；所有**有状态或有副作用的工具（`exclusive`）**按各自资源键（`path:<...>`、`ws:<...>`、`cmd:<...>`、`conv:<...>`、`mcp_server:<endpoint_fingerprint>`）跨 Role 与 Router 全局协调串行。
 
@@ -75,7 +75,9 @@ flowchart LR
      - `review`：外部写操作/发消息/变更状态/敏感数据读取 → 运行期走 `PermissionReviewer`（结合 `user_intent` + `UserApprovalPort`）；
      - `pass`：纯只读无副作用检索（结合 `readOnlyHint=True` 且 `Jev` 确认无敏感风险）→ 运行期零 RTT 直接放行。
    - **队列锁模式与角色推荐**：同时输出 `lock_mode`（`shared` / `exclusive`，资源键 `mcp:<server_name>:<tool_name>`）与 `recommended_roles`（当用户配置未显式指定 `roles` 时生效）。
-3. **Fail-Safe 兜底**：未在 `mcp_tool_policies` 登记或运行时 `schema_hash` 漂移的 MCP 工具，运行期一律兜底为 `REVIEW` + `exclusive`。
+3. **Fail-Closed 不可用与禁止掩盖错误**：
+   - **禁止用降级策略掩盖预编译错误**：`mcp.json` 解析/环境变量展开失败、`Jev` 请求异常（如 404/超时/网络错）或返回缺项/未知 `role_group` 时，预编译器必须将 `McpCompileEntry.status` 标记为 `"error"` 并保留真实 `error` 信息，**严禁将降级猜测结果写入 `mcp_tool_policies` 伪装成 `"compiled"`/`"cached"`**，同时将其纳入 `blocked_servers` 并在 `/v1/mcps` 与 `<workspace_capabilities>`（`status="error"`, `roles="none"`）如实暴露；
+   - 未在 `mcp_tool_policies` 登记或运行时 `schema_hash` 漂移的 MCP 工具，运行期执行阶段由 `PermissionGuardHook` 兜底为 `REVIEW + exclusive`（绝不静默 `pass`），而角色分配阶段对无法判断危害的 MCP 直接按**不可用（不挂载）**处理。
 
 ---
 

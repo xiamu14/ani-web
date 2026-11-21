@@ -9,6 +9,7 @@ from pathlib import Path
 
 from agent.extensions.mcp_config import McpServerSpec, load_mcp_configs
 from agent.permissions import (
+    McpCompileEntry,
     McpCompileReport,
     McpPolicyCompiler,
     McpToolPolicy,
@@ -73,9 +74,30 @@ class WorkspaceMcpManager:
         """若工作区 MCP 配置尚未编译或指纹已变化，则执行一次增量预编译并刷新缓存。"""
         ws_key = str(Path(work_path).expanduser().resolve()) if work_path else ""
         ws_root = Path(ws_key) if ws_key else None
-        merged = load_mcp_configs(
-            global_path=self._global_path, workspace_root=ws_root
-        )
+        try:
+            merged = load_mcp_configs(
+                global_path=self._global_path, workspace_root=ws_root
+            )
+        except (OSError, ValueError) as exc:
+            return WorkspaceMcpSnapshot(
+                work_path=ws_key or None,
+                specs=(),
+                policies={},
+                blocked_servers=frozenset({"__config__"}),
+                prefixes=(),
+                report=McpCompileReport(
+                    entries=(
+                        McpCompileEntry(
+                            server_name="__config__",
+                            endpoint_fingerprint="",
+                            status="error",
+                            error=f"MCP config load failed: {exc}",
+                        ),
+                    ),
+                    policies=(),
+                    total_jev_calls=0,
+                ),
+            )
         fp = tuple((s.name, s.endpoint_fingerprint) for s in merged.servers)
 
         cached = self._cache.get(ws_key)

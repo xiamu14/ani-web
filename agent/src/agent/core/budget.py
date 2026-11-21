@@ -42,13 +42,17 @@ class LoopBudgetPolicy:
     max_steer_injections: int = 10
     max_retries: int = 3
 
-    def to_usage_limits(self) -> UsageLimits:
-        """转换为 Pydantic AI 原生 UsageLimits 硬上限。"""
+    def to_usage_limits(self, *, base_usage: RunUsage | None = None) -> UsageLimits:
+        """转换为 Pydantic AI 原生 UsageLimits（传入 base_usage 时按单轮增量预算计算）。"""
+        base_reqs = (base_usage.requests or 0) if base_usage is not None else 0
+        base_tools = (base_usage.tool_calls or 0) if base_usage is not None else 0
+        base_total = (base_usage.total_tokens or 0) if base_usage is not None else 0
+        base_out = (base_usage.output_tokens or 0) if base_usage is not None else 0
         return UsageLimits(
-            request_limit=self.max_requests,
-            tool_calls_limit=self.max_tool_calls,
-            total_tokens_limit=self.max_total_tokens,
-            output_tokens_limit=self.max_output_tokens,
+            request_limit=base_reqs + self.max_requests,
+            tool_calls_limit=base_tools + self.max_tool_calls,
+            total_tokens_limit=base_total + self.max_total_tokens,
+            output_tokens_limit=base_out + self.max_output_tokens,
         )
 
     @property
