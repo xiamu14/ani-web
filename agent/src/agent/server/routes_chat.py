@@ -262,14 +262,39 @@ async def send_message_endpoint(request: Request) -> Response:
     )
 
     async def _bg_run() -> None:
-        _ = await rt.router.handle_user_message(
-            prompt,
-            conversation_id=cid,
-            work_path=body.work_path,
-            routing_mode=body.routing_mode,
-            delivery_mode=body.delivery_mode,
-            run_id=run_id,
-        )
+        try:
+            _ = await rt.router.handle_user_message(
+                prompt,
+                conversation_id=cid,
+                work_path=body.work_path,
+                routing_mode=body.routing_mode,
+                delivery_mode=body.delivery_mode,
+                run_id=run_id,
+            )
+        except Exception as exc:  # noqa: BLE001  # 后台 Run 边界：防止进入 agent.run 前异常静默丢失
+            if "_run_failed_emitted" in getattr(exc, "__notes__", ()):
+                return
+            import logfire
+
+            from agent.hooks import format_exception_detail
+            from agent.protocol import RunFailedPayload
+
+            detail = format_exception_detail(exc)
+            logfire.error(
+                "Router background run failed",
+                conversation_id=cid,
+                run_id=run_id,
+                error_type=type(exc).__name__,
+                error=detail,
+            )
+            if rt.event_bus is not None:
+                _ = rt.event_bus.publish(
+                    "run.failed",
+                    RunFailedPayload(error_code=type(exc).__name__, error_message=detail),
+                    conversation_id=cid,
+                    role_name="router",
+                    run_id=run_id,
+                )
 
     bg_task = asyncio.create_task(_bg_run(), name=f"router-run-{run_id}")
     state.background_runs[run_id] = bg_task

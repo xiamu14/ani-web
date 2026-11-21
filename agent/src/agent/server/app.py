@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
+import logfire
 from pydantic import JsonValue, ValidationError
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
@@ -50,6 +51,22 @@ async def _handle_validation(request: Request, exc: Exception) -> Response:
     )
 
 
+async def _handle_internal_error(request: Request, exc: Exception) -> Response:
+    logfire.error(
+        "Unhandled server exception",
+        path=request.url.path,
+        method=request.method,
+        error_type=type(exc).__name__,
+        error=str(exc) or type(exc).__name__,
+    )
+    return json_error(
+        request,
+        status_code=500,
+        code=type(exc).__name__,
+        message=str(exc) or type(exc).__name__,
+    )
+
+
 def create_app(
     runtime: SuperAgentRuntime,
     *,
@@ -83,6 +100,7 @@ def create_app(
             InteractionPayloadError: _handle_validation,
             ValidationError: _handle_validation,
             ValueError: _handle_validation,
+            Exception: _handle_internal_error,
         },
     )
     app.state.server_state = ServerState(

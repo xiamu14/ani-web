@@ -1,5 +1,6 @@
 """Hooks 包: 对外暴露 Router 请求级钩子与语义路由前置钩子。"""
 
+from agent.hooks.error_hook import RunErrorReportingHook, format_exception_detail
 from agent.hooks.loop_safety_hook import BUDGET_WRAPUP_WARNING, LoopSafetyGuardHook
 from agent.hooks.memory_hook import (
     FILE_CONTEXT_MIN_BYTES,
@@ -31,11 +32,13 @@ __all__ = [
     "PermissionGuardHook",
     "RouterContextHook",
     "RouterSteerHook",
+    "RunErrorReportingHook",
     "SemanticRoutingHook",
     "TaskSteerHook",
     "WorkspaceMcpPort",
     "WorkspacePromptPort",
     "canonicalize_tool_args",
+    "format_exception_detail",
     "get_capability_priority",
     "sort_capabilities",
 ]

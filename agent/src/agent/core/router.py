@@ -17,10 +17,7 @@ from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.conversation import Conversation
 from pydantic_ai.conversation_store import ConversationConflict
 from pydantic_ai.exceptions import (
-    AgentRunError,
-    ModelAPIError,
     RunCancelled,
-    UsageLimitExceeded,
 )
 from pydantic_ai.messages import TextContent, UserContent
 from pydantic_ai.models import KnownModelName, Model
@@ -34,8 +31,10 @@ from agent.db import SQLModelConversationStore
 from agent.hooks import (
     RouterContextHook,
     RouterSteerHook,
+    RunErrorReportingHook,
     SemanticRoutingHook,
     WorkspaceMcpPort,
+    format_exception_detail,
     sort_capabilities,
 )
 from agent.protocol.event_bus import RuntimeEventBus
@@ -63,7 +62,7 @@ from agent.tools import (
 DEFAULT_ROUTER_INSTRUCTIONS = """\
 你是全局协调器（Router），负责直接与用户对话并协调后台 Role Agents。
 核心原则：
-1. 轻量化与零阻塞：你可以直接回答普通问题；耗时的代码修改、调研、测试等任务一律通过 `dispatch_role_agent` 派发给对应角色（如 coder、reviewer、tester、researcher），派发后立即向用户反馈 @task_id，不等待后台完成。
+1. 轻量化与零阻塞：你可以直接回答普通问题；耗时的代码修改、调研、测试等任务一律交给对应 Role（如 `coder`、`reviewer`、`tester`、`researcher`）后台执行，派发/复用后立即向用户反馈 `@task_id`，不等待后台完成。**同主题同角色优先复用**：若当前对话中已存在同一主题且同一角色的已有任务（无论是 `completed`/`failed`/`interrupted` 还是 `running`/`queued`，不确定时可先 `list_tasks` 查看），优先通过 `steer_or_revise_task` 复用该 `@task_id` 续跑，避免重复新建；仅在新主题、切换角色或需并行任务时才调用 `dispatch_role_agent`。
 2. 工作区读写锁与依赖规划：
    - 调度器自动对同目录（含父子目录重叠）执行读写锁：`coder`/`tester` 为写锁（exclusive），`researcher`/`reviewer` 为共享读锁（shared），只读任务之间自动并发、写锁与读写均互斥防饥饿。
    - 若用户明确要求先后顺序（如“先让 coder 改完再让 researcher 总结”），请先派发前置任务拿到 `@task_id`，再传 `depends_on=["T1"]` 派发后续任务；需要了解当前锁占用时可调用 `inspect_workspace_locks`。
@@ -146,6 +145,7 @@ class SuperAgentRouter:
         capabilities: list[AbstractCapability[RouterDeps]] = [
             RouterContextHook(self._pending_events, self._context_tree, mcp_manager=mcp_manager),
             RouterSteerHook(self._steer_queues),
+            RunErrorReportingHook(agent_name="router"),
             cast(
                 AbstractCapability[RouterDeps],
                 ToolExecutionQueueHook(coordinator=tool_coordinator),
@@ -320,13 +320,17 @@ class SuperAgentRouter:
                         conversation_id=target_id, role_name="router", run_id=effective_run_id,
                     )
                 return RouterReply(conversation_id=target_id, output="", run_id=effective_run_id, interrupted=True)
-            except Exception as exc:
+            except Exception as exc:  # 播报兜底：统一捕获并记录所有运行时异常
                 if self._event_bus is not None:
                     _ = self._event_bus.publish(
                         "run.failed",
-                        RunFailedPayload(error_code=type(exc).__name__, error_message=str(exc)),
+                        RunFailedPayload(
+                            error_code=type(exc).__name__,
+                            error_message=format_exception_detail(exc),
+                        ),
                         conversation_id=target_id, role_name="router", run_id=effective_run_id,
                     )
+                exc.add_note("_run_failed_emitted")
                 raise
             finally:
                 self._running_conversations.discard(target_id)
@@ -417,11 +421,11 @@ class SuperAgentRouter:
                     usage_limits=self._budget_policy.to_usage_limits(base_usage=conv.usage),
                     timeout=self._budget_policy.wall_clock_timeout_sec,
                 )
-        except (AgentRunError, ModelAPIError, UsageLimitExceeded, TimeoutError) as exc:
+        except Exception as exc:  # noqa: BLE001  # 播报兜底：统一捕获并记录所有运行时异常
             logfire.error(
                 "Router proactive report failed; falling back to raw ticket summary",
                 main_conversation_id=conversation_id,
-                error=str(exc),
+                error=format_exception_detail(exc),
             )
             fallback_output = f"[后台任务通知]\n{report}"
             if self._event_bus is not None:

@@ -15,23 +15,13 @@ from pydantic_ai import CancellationToken
 from pydantic_ai._http import AsyncHTTPClient
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.conversation_store import ConversationStore
-from pydantic_ai.exceptions import (
-    AgentRunError,
-    ModelAPIError,
-    RunCancelled,
-    UsageLimitExceeded,
-)
+from pydantic_ai.exceptions import RunCancelled
 from pydantic_ai.workspaces import LocalWorkspaceBackend
 from pydantic_ai_harness.ask_user import AskUser
 from pydantic_ai_harness.step_persistence import StepStore
 
 from agent.attachments import AttachmentRegistry
-from agent.core.lock_queue import (
-    LockQueueState,
-    QueuedTask,
-    as_lock_mode,
-    format_worker_error,
-)
+from agent.core.lock_queue import LockQueueState, QueuedTask, as_lock_mode
 from agent.core.mcp_workspace import WorkspaceMcpManager
 from agent.core.outcome_judge import ToolExecutionTrace, evaluate_task_outcome
 from agent.core.roles import RoleRegistry, RoleSessionManager, RoleSpec
@@ -42,7 +32,13 @@ from agent.extensions import (
     merge_workspace_mcp_specs,
     select_mcp_capabilities_for_role,
 )
-from agent.hooks import LoopSafetyGuardHook, PermissionGuardHook, TaskSteerHook
+from agent.hooks import (
+    LoopSafetyGuardHook,
+    PermissionGuardHook,
+    RunErrorReportingHook,
+    TaskSteerHook,
+    format_exception_detail,
+)
 from agent.llm import LlmConcurrencyController
 from agent.memory import (
     MemoryStorePort,
@@ -363,6 +359,7 @@ class WorkspaceLockManager:
                 extra_caps: list[AbstractCapability[object]] = [
                     LoopSafetyGuardHook(policy=policy, trace=trace),
                     TaskSteerHook(steer_queue, max_injections=policy.max_steer_injections),
+                    RunErrorReportingHook(agent_name=role.name, conversation_id=main_conversation_id, task_id=task_id, role_name=role.name),
                     ToolExecutionQueueHook(workspace_root=ticket.work_path, coordinator=self._tool_coordinator, mcp_policies=eff_policies, known_mcp_prefixes=eff_prefixes),
                     *mem_bundle.capabilities,
                     *select_mcp_capabilities_for_role(role.name, eff_specs, policies=eff_policies, blocked_servers=eff_blocked, token_root=self._mcp_token_root, elicitation_handler=self._elicitation_handler, http_client=self._mcp_http_client),
@@ -433,9 +430,8 @@ class WorkspaceLockManager:
                 pending_event = (f"@{task_id} (@{role.name}) 已中断并保留断点（可通过 Revise 恢复）。", "interrupted")
             if isinstance(exc, asyncio.CancelledError):
                 raise
-        except (AgentRunError, ModelAPIError, UsageLimitExceeded, TimeoutError) as exc:
-            err_msg = format_worker_error(exc)
-            logfire.error("Role worker failed", main_conversation_id=main_conversation_id, task_id=task_id, role_name=role.name, error=err_msg)
+        except Exception as exc:  # noqa: BLE001  # Worker 边界：统一捕获、落盘并上报所有工具/模型/网络异常
+            err_msg = format_exception_detail(exc)
             f_row = await self._ticket_store.update_ticket_status(main_conversation_id, task_id, status="failed", result_summary=err_msg)
             self._bridge.emit_worker_outcome(row=f_row, run_id=worker_run_id, outcome="failed", error_code=type(exc).__name__, error_message=err_msg)
             status_persisted = True
@@ -488,8 +484,8 @@ class WorkspaceLockManager:
             return
         try:
             _ = await self._on_event(main_conversation_id, summary, kind)
-        except (AgentRunError, ModelAPIError, UsageLimitExceeded, TimeoutError, RuntimeError, OSError) as exc:
-            logfire.error("Event callback failed (isolated from scheduler loop)", main_conversation_id=main_conversation_id, kind=kind, error=format_worker_error(exc))
+        except Exception as exc:  # noqa: BLE001  # 回调隔离：防止事件回调异常破坏调度器循环
+            logfire.error("Event callback failed (isolated from scheduler loop)", main_conversation_id=main_conversation_id, kind=kind, error=format_exception_detail(exc))
 
     async def wait_all(self) -> None:
         """等待当前所有后台 Worker 协程结算（含连续出队的排队任务）。"""

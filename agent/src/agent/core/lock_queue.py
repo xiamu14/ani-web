@@ -21,15 +21,6 @@ def as_lock_mode(value: str) -> LockMode:
     return "exclusive"
 
 
-def format_worker_error(exc: Exception) -> str:
-    """提取 Worker 异常及底层 cause 摘要。"""
-    parts = [f"{type(exc).__name__}: {exc}"]
-    cause = exc.__cause__ or exc.__context__
-    if cause is not None and str(cause) != str(exc):
-        parts.append(f"cause={type(cause).__name__}: {cause}")
-    return " | ".join(parts)
-
-
 @dataclass(frozen=True, kw_only=True)
 class QueuedTask:
     """等待锁或前置依赖的排队任务项。"""
