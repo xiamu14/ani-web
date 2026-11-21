@@ -142,6 +142,7 @@ class SQLModelConversationStore(ConversationStore):
                         kind=entry.kind,
                         stop_backtrack=0,
                         message_json=dumped_msg,
+                        run_id=getattr(entry.message, "run_id", None),
                         created_at=_utc_iso(),
                     )
                 )

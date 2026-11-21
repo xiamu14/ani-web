@@ -107,6 +107,7 @@ def build_openapi_document(app: Starlette) -> dict[str, JsonValue]:
         McpsListView,
         McpToolPolicyView,
         RuntimeSnapshotView,
+        RunTurnView,
         SendMessageReceipt,
         SendMessageRequest,
         SkillsListView,
@@ -115,6 +116,8 @@ def build_openapi_document(app: Starlette) -> dict[str, JsonValue]:
         TaskView,
         TreeUsageSummaryView,
         TreeView,
+        TurnPageView,
+        TurnStepView,
     )
 
     _, top_schema = models_json_schema(
@@ -136,6 +139,9 @@ def build_openapi_document(app: Starlette) -> dict[str, JsonValue]:
             (McpsListView, "validation"),
             (McpServerView, "validation"),
             (McpToolPolicyView, "validation"),
+            (TurnPageView, "validation"),
+            (RunTurnView, "validation"),
+            (TurnStepView, "validation"),
         ],
         ref_template="#/components/schemas/{model}",
     )

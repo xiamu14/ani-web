@@ -322,3 +322,41 @@ class McpsListView(StrictProtocolModel):
 
     servers: list[McpServerView] = Field(default_factory=list)
     total_jev_calls: int = 0
+
+
+TurnStepKindLiteral = Literal["thinking", "tool", "text"]
+TurnToolStatusLiteral = Literal["running", "done", "error"]
+
+
+class TurnStepView(StrictProtocolModel):
+    """单轮对话内按发生顺序排列的统一步骤视图（历史与 SSE 实时共用）。"""
+
+    kind: TurnStepKindLiteral
+    text: str | None = None
+    tool_call_id: str | None = None
+    tool_name: str | None = None
+    status: TurnToolStatusLiteral | None = None
+    args_text: str | None = None
+    result_text: str | None = None
+    duration_ms: int | None = None
+
+
+class RunTurnView(StrictProtocolModel):
+    """按 run_id 聚合的单轮对话气泡视图。"""
+
+    run_id: str | None = None
+    user_entry_id: str | None = None
+    user_text: str = ""
+    steps: list[TurnStepView] = Field(default_factory=list)
+    child_branch_ids: list[str] = Field(default_factory=list)
+    attached_task_ids: list[str] = Field(default_factory=list)
+    created_at: str = ""
+
+
+class TurnPageView(StrictProtocolModel):
+    """`/v1/conversations/{cid}/entries?view=turns` 分页响应。"""
+
+    conversation_id: str
+    turns: list[RunTurnView] = Field(default_factory=list)
+    has_more: bool = False
+    next_before_entry_id: str | None = None

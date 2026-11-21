@@ -572,6 +572,20 @@ class TestStep126E2EAndSchemas(unittest.IsolatedAsyncioTestCase):
                             cast(dict[str, object], entries_resp.json())["entries"],
                         )
                         self.assertGreaterEqual(len(entries), 2)
+                        self.assertTrue(
+                            any(e.get("run_id") for e in entries if e.get("kind") == "message")
+                        )
+
+                        turns_resp = await client.get(
+                            f"/v1/conversations/{cid}/entries?view=turns", headers=headers
+                        )
+                        self.assertEqual(turns_resp.status_code, 200)
+                        turns = cast(
+                            list[dict[str, object]],
+                            cast(dict[str, object], turns_resp.json())["turns"],
+                        )
+                        self.assertGreaterEqual(len(turns), 1)
+                        self.assertTrue(any(cast(list[object], t["steps"]) for t in turns))
 
                         # 9. Context 9 桶校准与三层用量核对
                         ctx_resp = await client.get(

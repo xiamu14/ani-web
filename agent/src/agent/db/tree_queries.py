@@ -65,6 +65,8 @@ class EntryPartData:
     tool_call_id: str | None = None
     attachment_id: str | None = None
     content_url: str | None = None
+    timestamp_ms: int | None = None
+    is_error: bool = False
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -100,12 +102,23 @@ def _extract_attachment_id(obj: object) -> str | None:
     return None
 
 
+def _ts_to_ms(dt: object) -> int | None:
+    ts_fn = getattr(dt, "timestamp", None)
+    if callable(ts_fn):
+        raw = ts_fn()
+        if isinstance(raw, (int, float)):
+            return int(raw * 1000)
+    return None
+
+
 def _message_to_part_data(msg: ModelMessage) -> list[EntryPartData]:
     out: list[EntryPartData] = []
     is_req = isinstance(msg, ModelRequest)
+    msg_ts_ms = _ts_to_ms(getattr(msg, "timestamp", None))
     for part in msg.parts:
+        part_ts_ms = _ts_to_ms(getattr(part, "timestamp", None)) or msg_ts_ms
         if isinstance(part, SystemPromptPart):
-            out.append(EntryPartData(part_kind=part.part_kind, role="system", text=str(part.content)))
+            out.append(EntryPartData(part_kind=part.part_kind, role="system", text=str(part.content), timestamp_ms=part_ts_ms))
         elif isinstance(part, UserPromptPart):
             if isinstance(part.content, str):
                 att_id = _extract_attachment_id(part.content)
@@ -116,6 +129,7 @@ def _message_to_part_data(msg: ModelMessage) -> list[EntryPartData]:
                         text=part.content,
                         attachment_id=att_id,
                         content_url=f"/v1/attachments/{att_id}/content" if att_id else None,
+                        timestamp_ms=part_ts_ms,
                     )
                 )
             else:
@@ -129,10 +143,11 @@ def _message_to_part_data(msg: ModelMessage) -> list[EntryPartData]:
                             text=text_val if isinstance(text_val, str) else None,
                             attachment_id=att_id,
                             content_url=f"/v1/attachments/{att_id}/content" if att_id else None,
+                            timestamp_ms=part_ts_ms,
                         )
                     )
         elif isinstance(part, (TextPart, ThinkingPart)):
-            out.append(EntryPartData(part_kind=part.part_kind, role="assistant", text=part.content))
+            out.append(EntryPartData(part_kind=part.part_kind, role="assistant", text=part.content, timestamp_ms=part_ts_ms))
         elif isinstance(part, ToolCallPart):
             out.append(
                 EntryPartData(
@@ -141,9 +156,12 @@ def _message_to_part_data(msg: ModelMessage) -> list[EntryPartData]:
                     text=part.args_as_json_str()[:300],
                     tool_name=part.tool_name,
                     tool_call_id=part.tool_call_id,
+                    timestamp_ms=part_ts_ms,
                 )
             )
         elif isinstance(part, (ToolReturnPart, RetryFeedbackPart)):
+            outcome = getattr(part, "outcome", None)
+            err = isinstance(part, RetryFeedbackPart) or outcome in ("failed", "interrupted")
             out.append(
                 EntryPartData(
                     part_kind=part.part_kind,
@@ -151,6 +169,8 @@ def _message_to_part_data(msg: ModelMessage) -> list[EntryPartData]:
                     text=str(part.content)[:400],
                     tool_name=getattr(part, "tool_name", None),
                     tool_call_id=getattr(part, "tool_call_id", None),
+                    timestamp_ms=part_ts_ms,
+                    is_error=err,
                 )
             )
         else:

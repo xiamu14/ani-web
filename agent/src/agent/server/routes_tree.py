@@ -8,7 +8,7 @@ from starlette.routing import Route
 
 from agent.core.budget import ROUTER_BUDGET_POLICY
 from agent.core.runtime import SuperAgentRuntime
-from agent.db.tree_queries import TreeTopologyData
+from agent.db.tree_queries import EntryPageData, TreeTopologyData
 from agent.protocol import (
     BranchModeLiteral,
     BranchView,
@@ -18,10 +18,13 @@ from agent.protocol import (
     EntryView,
     ForkConversationRequest,
     PatchConversationRequest,
+    RunTurnView,
     TreeBranchCreatedPayload,
     TreeBranchSwitchedPayload,
     TreeBranchUpdatedPayload,
     TreeView,
+    TurnPageView,
+    TurnStepView,
     to_run_usage_view,
     utc_rfc3339,
 )
@@ -229,6 +232,85 @@ async def patch_conversation_endpoint(request: Request) -> Response:
     return json_model(branch)
 
 
+def _build_turn_page(page: EntryPageData) -> TurnPageView:
+    """按 run_id 聚合单页条目为结构化 RunTurnView（含配对后的 thinking/tool/text steps）。"""
+    turns: list[RunTurnView] = []
+    cur: RunTurnView | None = None
+    tool_steps: dict[str, tuple[TurnStepView, int | None]] = {}
+
+    def _start_turn(run_id: str | None, created_at: str) -> RunTurnView:
+        nonlocal cur
+        tool_steps.clear()
+        cur = RunTurnView(run_id=run_id, created_at=created_at)
+        turns.append(cur)
+        return cur
+
+    for entry in page.entries:
+        if entry.kind in ("root", "conv_init"):
+            continue
+        has_user = any(p.role == "user" for p in entry.parts)
+        if cur is None or (
+            entry.run_id is not None and entry.run_id != cur.run_id
+        ) or (entry.run_id is None and has_user):
+            cur = _start_turn(entry.run_id, entry.created_at)
+
+        for cid in entry.child_branch_ids:
+            if cid not in cur.child_branch_ids:
+                cur.child_branch_ids.append(cid)
+        for tid in entry.attached_task_ids:
+            if tid not in cur.attached_task_ids:
+                cur.attached_task_ids.append(tid)
+
+        for part in entry.parts:
+            if part.role == "user":
+                if cur.user_entry_id is None:
+                    cur.user_entry_id = entry.entry_id
+                if part.text:
+                    cur.user_text = f"{cur.user_text}\n{part.text}".strip() if cur.user_text else part.text
+            elif part.part_kind == "thinking" and part.text:
+                cur.steps.append(TurnStepView(kind="thinking", text=part.text))
+            elif part.part_kind == "text" and part.text:
+                cur.steps.append(TurnStepView(kind="text", text=part.text))
+            elif part.part_kind == "tool-call":
+                tc_id = part.tool_call_id or ""
+                step = TurnStepView(
+                    kind="tool",
+                    tool_call_id=tc_id or None,
+                    tool_name=part.tool_name,
+                    status="running",
+                    args_text=part.text or "",
+                )
+                cur.steps.append(step)
+                if tc_id:
+                    tool_steps[tc_id] = (step, part.timestamp_ms)
+            elif part.role == "tool":
+                tc_id = part.tool_call_id or ""
+                matched = tool_steps.get(tc_id)
+                if matched is not None:
+                    step, start_ms = matched
+                    step.status = "error" if part.is_error else "done"
+                    step.result_text = part.text or ""
+                    if start_ms is not None and part.timestamp_ms is not None:
+                        step.duration_ms = max(0, part.timestamp_ms - start_ms)
+                else:
+                    cur.steps.append(
+                        TurnStepView(
+                            kind="tool",
+                            tool_call_id=tc_id or None,
+                            tool_name=part.tool_name,
+                            status="error" if part.is_error else "done",
+                            result_text=part.text or "",
+                        )
+                    )
+
+    return TurnPageView(
+        conversation_id=page.conversation_id,
+        turns=turns,
+        has_more=page.has_more,
+        next_before_entry_id=page.next_before_entry_id,
+    )
+
+
 async def get_entries_endpoint(request: Request) -> Response:
     cid = path_param(request, "cid")
     rt = get_state(request).runtime
@@ -238,7 +320,10 @@ async def get_entries_endpoint(request: Request) -> Response:
         )
     limit = int(request.query_params.get("limit", "50"))
     before = request.query_params.get("before_entry_id")
+    view_mode = request.query_params.get("view", "entries")
     page = await rt.protocol_store.read_entry_page(cid, limit=limit, before_entry_id=before)
+    if view_mode == "turns":
+        return json_model(_build_turn_page(page))
     view = EntryPageView(
         conversation_id=page.conversation_id,
         has_more=page.has_more,

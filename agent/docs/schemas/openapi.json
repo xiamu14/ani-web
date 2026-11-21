@@ -1504,6 +1504,69 @@
         "title": "RoleTaskUsageItemView",
         "type": "object"
       },
+      "RunTurnView": {
+        "additionalProperties": false,
+        "description": "按 run_id 聚合的单轮对话气泡视图。",
+        "properties": {
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Run Id"
+          },
+          "user_entry_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "User Entry Id"
+          },
+          "user_text": {
+            "default": "",
+            "title": "User Text",
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/TurnStepView"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "child_branch_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Child Branch Ids",
+            "type": "array"
+          },
+          "attached_task_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Attached Task Ids",
+            "type": "array"
+          },
+          "created_at": {
+            "default": "",
+            "title": "Created At",
+            "type": "string"
+          }
+        },
+        "title": "RunTurnView",
+        "type": "object"
+      },
       "RunUsageView": {
         "additionalProperties": false,
         "description": "单次 Run / Task 的累计用量（Layer B，严格遵循 UsageBase.input_tokens 包含式口径）。",
@@ -2177,6 +2240,154 @@
           }
         },
         "title": "TreeView",
+        "type": "object"
+      },
+      "TurnPageView": {
+        "additionalProperties": false,
+        "description": "`/v1/conversations/{cid}/entries?view=turns` 分页响应。",
+        "properties": {
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "turns": {
+            "items": {
+              "$ref": "#/components/schemas/RunTurnView"
+            },
+            "title": "Turns",
+            "type": "array"
+          },
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "next_before_entry_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Next Before Entry Id"
+          }
+        },
+        "required": [
+          "conversation_id"
+        ],
+        "title": "TurnPageView",
+        "type": "object"
+      },
+      "TurnStepView": {
+        "additionalProperties": false,
+        "description": "单轮对话内按发生顺序排列的统一步骤视图（历史与 SSE 实时共用）。",
+        "properties": {
+          "kind": {
+            "enum": [
+              "thinking",
+              "tool",
+              "text"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Text"
+          },
+          "tool_call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tool Call Id"
+          },
+          "tool_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tool Name"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "running",
+                  "done",
+                  "error"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status"
+          },
+          "args_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Args Text"
+          },
+          "result_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Result Text"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Duration Ms"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "TurnStepView",
         "type": "object"
       },
       "WorkspaceLockView": {
